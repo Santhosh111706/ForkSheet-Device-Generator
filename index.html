@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forksheet CMOS SCM Generator</title>
+<meta name="description" content="Browser-based parametric generator for 3D Forksheet CMOS Sentaurus SDE geometry, with a live 3D preview. Runs entirely client-side.">
+
+<!-- Relative paths so the page works from disk and from any GitHub Pages sub-path -->
+<link rel="stylesheet" href="css/style.css">
+
+<!--
+  Three.js is loaded as a classic (non-module) script from a CDN.
+
+  Version 0.147 is pinned deliberately: it is the last release that still
+  ships both the UMD build and examples/js/controls/OrbitControls.js. Classic
+  scripts work when index.html is opened directly from disk with a file://
+  URL, which ES modules do not - browsers block module loading over file://.
+  That is what lets this page run both locally and on GitHub Pages.
+
+  If the OrbitControls script fails to load for any reason, preview.js falls
+  back to its own built-in orbit controller, so rotate/zoom/pan still work.
+-->
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+
+<body>
+
+<!-- ============================ header ============================ -->
+<header id="titlebar">
+  <div class="brand"><span class="dot"></span>Forksheet CMOS SCM Generator</div>
+  <div class="subtitle">3D Forksheet CMOS &middot; Sentaurus SDE geometry &middot; parametric</div>
+  <div class="header-right">
+    <span class="privacy" title="No upload, no server. Everything is computed in your browser.">
+      &#128274; runs entirely in your browser
+    </span>
+  </div>
+</header>
+
+<div id="page">
+
+  <!-- ==================== generator controls ==================== -->
+  <section id="controls">
+
+    <!-- ---------- study parameters ---------- -->
+    <div class="card">
+      <div class="section-head"><h2>Study parameters</h2><span class="chev"></span></div>
+      <div class="section-body">
+        <p class="note">
+          The three geometry parameters of the self-heating study. All lengths
+          are in micrometres (1&nbsp;nm = 0.001&nbsp;&micro;m). Every other
+          coordinate in the structure is recomputed from these.
+        </p>
+
+        <div class="field">
+          <label for="T_NS">T_NS &mdash; nanosheet thickness</label>
+          <input id="T_NS" type="number" step="0.001" min="0.002" value="0.006">
+          <span class="unit">&micro;m</span>
+          <small>Vertical (Y) extent of each sheet. Drives sheet pitch, gate bands and device height.</small>
+        </div>
+
+        <div class="field">
+          <label for="W_NS">W_NS &mdash; nanosheet width</label>
+          <input id="W_NS" type="number" step="0.001" min="0.005" value="0.030">
+          <span class="unit">&micro;m</span>
+          <small>Transverse (Z) extent of each sheet. Drives the HfO<sub>2</sub> collars, gate bridges and the pMOS offset.</small>
+        </div>
+
+        <div class="field">
+          <label for="T_FORK">T_FORK &mdash; fork wall thickness</label>
+          <input id="T_FORK" type="number" step="0.001" min="0.002" value="0.008">
+          <span class="unit">&micro;m</span>
+          <small>Si<sub>3</sub>N<sub>4</sub> wall between nMOS and pMOS. Sets the device separation and the well split plane.</small>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- generation options ---------- -->
+    <div class="card">
+      <div class="section-head"><h2>Generation options</h2><span class="chev"></span></div>
+      <div class="section-body">
+
+        <div class="field">
+          <label for="gen-mode">Mode</label>
+          <select id="gen-mode">
+            <option value="single">Single geometry case</option>
+            <option value="one_at_a_time">Sweep &mdash; one parameter at a time</option>
+            <option value="full_grid">Sweep &mdash; full grid</option>
+          </select>
+          <small>One at a time varies each parameter while holding the other two at the values above. Full grid takes every combination.</small>
+        </div>
+
+        <div id="sweep-fields">
+          <div class="field">
+            <label for="sweep-T_NS">T_NS values</label>
+            <input id="sweep-T_NS" type="text" value="0.004, 0.005, 0.006">
+            <small>comma separated</small>
+          </div>
+          <div class="field">
+            <label for="sweep-W_NS">W_NS values</label>
+            <input id="sweep-W_NS" type="text" value="0.015, 0.020, 0.025">
+          </div>
+          <div class="field">
+            <label for="sweep-T_FORK">T_FORK values</label>
+            <input id="sweep-T_FORK" type="text" value="0.006, 0.008, 0.010">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="mesh-prefix-mode">Mesh prefix</label>
+          <select id="mesh-prefix-mode">
+            <option value="auto">auto &mdash; name the mesh after the case</option>
+            <option value="custom">custom &mdash; fixed name</option>
+          </select>
+          <small>auto keeps sweep runs from overwriting each other. A fixed name such as fork1108 matches an existing sdevice.cmd Grid entry.</small>
+        </div>
+
+        <div class="field">
+          <label for="mesh-prefix-custom">Custom prefix</label>
+          <input id="mesh-prefix-custom" type="text" value="fork1108" disabled>
+          <small>writes &lt;prefix&gt;_msh.tdr</small>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- advanced constants ---------- -->
+    <div class="card collapsed">
+      <div class="section-head"><h2>Advanced &mdash; fixed design constants</h2><span class="chev"></span></div>
+      <div class="section-body">
+        <p class="note">
+          These are the constants at the top of the Python generator. They are
+          not part of the study, but they are editable there, so they are
+          editable here too. Changing one recomputes the whole structure.
+        </p>
+
+        <div class="grid2">
+          <div class="field compact">
+            <label for="L_PAD">L_PAD &mdash; source/drain pad length</label>
+            <input id="L_PAD" type="number" step="0.001" value="0.025"><span class="unit">&micro;m</span>
+          </div>
+          <div class="field compact">
+            <label for="T_SPACER">T_SPACER &mdash; spacer thickness</label>
+            <input id="T_SPACER" type="number" step="0.001" value="0.005"><span class="unit">&micro;m</span>
+          </div>
+          <div class="field compact">
+            <label for="L_G">L_G &mdash; gate length</label>
+            <input id="L_G" type="number" step="0.001" value="0.020"><span class="unit">&micro;m</span>
+          </div>
+          <div class="field compact">
+            <label for="T_HFO2">T_HFO2 &mdash; HfO<sub>2</sub> collar</label>
+            <input id="T_HFO2" type="number" step="0.001" value="0.002"><span class="unit">&micro;m</span>
+          </div>
+          <div class="field compact">
+            <label for="T_METAL">T_METAL &mdash; gate metal in each gap</label>
+            <input id="T_METAL" type="number" step="0.001" value="0.006"><span class="unit">&micro;m</span>
+          </div>
+          <div class="field compact">
+            <label for="T_LINER">T_LINER &mdash; SiO<sub>2</sub> gate liner</label>
+            <input id="T_LINER" type="number" step="0.001" value="0.002"><span class="unit">&micro;m</span>
+          </div>
+          <div class="field compact">
+            <label for="T_BRIDGE">T_BRIDGE &mdash; gate bridge thickness</label>
+            <input id="T_BRIDGE" type="number" step="0.001" value="0.010"><span class="unit">&micro;m</span>
+          </div>
+          <div class="field compact">
+            <label for="T_SUB">T_SUB &mdash; substrate depth</label>
+            <input id="T_SUB" type="number" step="0.01" value="0.150"><span class="unit">&micro;m</span>
+          </div>
+          <div class="field compact">
+            <label for="T_WELL">T_WELL &mdash; well depth</label>
+            <input id="T_WELL" type="number" step="0.01" value="0.100"><span class="unit">&micro;m</span>
+          </div>
+          <div class="field compact">
+            <label for="MESH_MIN_X">MESH_MIN_X</label>
+            <input id="MESH_MIN_X" type="number" step="0.001" value="0.003"><span class="unit">&micro;m</span>
+          </div>
+          <div class="field compact">
+            <label for="MESH_MIN_Y">MESH_MIN_Y</label>
+            <input id="MESH_MIN_Y" type="number" step="0.001" value="0.001"><span class="unit">&micro;m</span>
+          </div>
+          <div class="field compact">
+            <label for="MESH_MIN_Z">MESH_MIN_Z</label>
+            <input id="MESH_MIN_Z" type="number" step="0.001" value="0.003"><span class="unit">&micro;m</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- actions ---------- -->
+    <div class="card">
+      <div class="section-body actions">
+        <button id="btn-generate" class="btn primary">Generate</button>
+        <button id="btn-download" class="btn" disabled>Download .scm</button>
+        <button id="btn-reset" class="btn">Reset</button>
+        <button id="btn-copy" class="btn ghost">Copy SCM</button>
+      </div>
+    </div>
+
+    <!-- ---------- status ---------- -->
+    <div id="status" class="status">
+      <div class="status-title">Ready</div>
+    </div>
+
+    <!-- ---------- computed summary ---------- -->
+    <div class="card">
+      <div class="section-head"><h2>Computed geometry</h2><span class="chev"></span></div>
+      <div class="section-body">
+        <table class="kv"><tbody id="summary-body">
+          <tr><td colspan="2" class="dim">-</td></tr>
+        </tbody></table>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ==================== live 3D preview ==================== -->
+  <section id="preview-section">
+    <div class="preview-head">
+      <h2>Live preview</h2>
+      <div class="preview-tools">
+        <span class="tool-label">View</span>
+        <button class="btn small" data-view="front">Front</button>
+        <button class="btn small" data-view="back">Back</button>
+        <button class="btn small" data-view="left">Left</button>
+        <button class="btn small" data-view="right">Right</button>
+        <button class="btn small" data-view="top">Top</button>
+        <button class="btn small" data-view="bottom">Bottom</button>
+        <button class="btn small" data-view="iso">Isometric</button>
+        <button class="btn small" id="btn-reset-cam">Reset</button>
+
+        <span class="tool-label">Projection</span>
+        <select id="sel-projection">
+          <option value="perspective">Perspective</option>
+          <option value="orthographic">Orthographic</option>
+        </select>
+
+        <span class="tool-label">Mode</span>
+        <select id="sel-style">
+          <option value="surface">Surface</option>
+          <option value="wireframe">Wireframe</option>
+        </select>
+
+        <span class="tool-label">Opacity</span>
+        <input id="opacity" type="range" min="10" max="100" value="100">
+
+        <label class="chk"><input type="checkbox" id="chk-edges" checked> Edges</label>
+        <label class="chk"><input type="checkbox" id="chk-axes" checked> Axes</label>
+      </div>
+    </div>
+
+    <div class="preview-body">
+      <div id="viewport">
+        <div id="viewer-hint" class="hint">
+          building preview&hellip;
+          <span class="dim">left-drag rotate &middot; right-drag pan &middot; scroll zoom &middot; click a region</span>
+        </div>
+      </div>
+
+      <aside id="inspector">
+        <div class="panel-title">Selected region</div>
+        <table class="kv" id="region-info"><tbody>
+          <tr><th>Name</th><td data-f="name">-</td></tr>
+          <tr><th>Material</th><td data-f="material">-</td></tr>
+          <tr><th>X min</th><td data-f="x0">-</td></tr>
+          <tr><th>X max</th><td data-f="x1">-</td></tr>
+          <tr><th>Y min</th><td data-f="y0">-</td></tr>
+          <tr><th>Y max</th><td data-f="y1">-</td></tr>
+          <tr><th>Z min</th><td data-f="z0">-</td></tr>
+          <tr><th>Z max</th><td data-f="z1">-</td></tr>
+          <tr><th>X length</th><td data-f="lx">-</td></tr>
+          <tr><th>Y length</th><td data-f="ly">-</td></tr>
+          <tr><th>Z length</th><td data-f="lz">-</td></tr>
+          <tr><th>Volume</th><td data-f="volume">-</td></tr>
+        </tbody></table>
+
+        <div class="panel-title">Materials</div>
+        <ul id="legend" class="legend"></ul>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ==================== generated SCM text ==================== -->
+  <section id="scm-section" class="card">
+    <div class="section-head">
+      <h2>Generated SCM <span id="scm-lines" class="dim"></span></h2>
+      <span class="chev"></span>
+    </div>
+    <div class="section-body">
+      <pre id="scm-preview"></pre>
+    </div>
+  </section>
+
+</div>
+
+<footer id="foot">
+  Parametric Forksheet CMOS generator &middot; output is compatible with the
+  SCM Device Viewer &middot; no server, no build step
+</footer>
+
+<script src="js/preview.js"></script>
+<script src="js/generator.js"></script>
+</body>
+</html>
