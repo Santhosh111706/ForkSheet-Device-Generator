@@ -1,3 +1,5 @@
+**Pages Link:** https://santhosh111706.github.io/ForkSheet-Device-Generator/
+
 # Forksheet CMOS SCM Generator
 
 A **static, browser-only** parametric generator for 3D Forksheet CMOS
