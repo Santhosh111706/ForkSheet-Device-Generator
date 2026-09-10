@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Forksheet CMOS SCM Generator</title>
 <meta name="description" content="Browser-based parametric generator for 3D Forksheet CMOS Sentaurus SDE geometry, with a live 3D preview. Runs entirely client-side.">
+<meta name="theme-color" content="#151a21">
 
 <!-- Relative paths so the page works from disk and from any GitHub Pages sub-path -->
 <link rel="stylesheet" href="css/style.css">
@@ -29,19 +30,53 @@
 
 <!-- ============================ header ============================ -->
 <header id="titlebar">
-  <div class="brand"><span class="dot"></span>Forksheet CMOS SCM Generator</div>
+  <button id="btn-toggle-controls" class="icon-btn" type="button"
+          aria-expanded="true" aria-controls="controls"
+          title="Show or hide the parameters panel">
+    <span class="ico" aria-hidden="true"></span>
+    <span class="icon-btn-text">Parameters</span>
+  </button>
+
+  <div class="brand">
+    <span class="dot"></span>
+    <span class="brand-name">Forksheet CMOS SCM Generator</span>
+  </div>
   <div class="subtitle">3D Forksheet CMOS &middot; Sentaurus SDE geometry &middot; parametric</div>
+
   <div class="header-right">
     <span class="privacy" title="No upload, no server. Everything is computed in your browser.">
       &#128274; runs entirely in your browser
     </span>
+
+    <!-- Quick actions mirror the sidebar buttons, so the two primary generator
+         actions stay reachable when the panels are closed on a small screen. -->
+    <button id="btn-generate-top" class="btn small primary" type="button"
+            title="Generate the SCM text">Generate</button>
+    <button id="btn-download-top" class="btn small" type="button" disabled
+            title="Download the generated .scm">Download</button>
+
+    <button id="btn-toggle-inspector" class="icon-btn" type="button"
+            aria-expanded="true" aria-controls="inspector"
+            title="Show or hide the inspector panel">
+      <span class="ico" aria-hidden="true"></span>
+      <span class="icon-btn-text">Inspector</span>
+    </button>
   </div>
 </header>
 
 <div id="page">
 
-  <!-- ==================== generator controls ==================== -->
-  <section id="controls">
+  <!-- ================= left sidebar: generator controls ================= -->
+  <section id="controls" class="sidebar" aria-label="Generator parameters">
+
+    <div class="sidebar-inner">
+
+    <!-- shown only in drawer (mobile) mode -->
+    <div class="drawer-head">
+      <span>Parameters</span>
+      <button class="drawer-close" type="button" data-close="controls"
+              aria-label="Close the parameters panel">&times;</button>
+    </div>
 
     <!-- ---------- study parameters ---------- -->
     <div class="card">
@@ -55,22 +90,28 @@
 
         <div class="field">
           <label for="T_NS">T_NS &mdash; nanosheet thickness</label>
-          <input id="T_NS" type="number" step="0.001" min="0.002" value="0.006">
-          <span class="unit">&micro;m</span>
+          <div class="ctl">
+            <input id="T_NS" type="number" step="0.001" min="0.002" value="0.006">
+            <span class="unit">&micro;m</span>
+          </div>
           <small>Vertical (Y) extent of each sheet. Drives sheet pitch, gate bands and device height.</small>
         </div>
 
         <div class="field">
           <label for="W_NS">W_NS &mdash; nanosheet width</label>
-          <input id="W_NS" type="number" step="0.001" min="0.005" value="0.030">
-          <span class="unit">&micro;m</span>
+          <div class="ctl">
+            <input id="W_NS" type="number" step="0.001" min="0.005" value="0.030">
+            <span class="unit">&micro;m</span>
+          </div>
           <small>Transverse (Z) extent of each sheet. Drives the HfO<sub>2</sub> collars, gate bridges and the pMOS offset.</small>
         </div>
 
         <div class="field">
           <label for="T_FORK">T_FORK &mdash; fork wall thickness</label>
-          <input id="T_FORK" type="number" step="0.001" min="0.002" value="0.008">
-          <span class="unit">&micro;m</span>
+          <div class="ctl">
+            <input id="T_FORK" type="number" step="0.001" min="0.002" value="0.008">
+            <span class="unit">&micro;m</span>
+          </div>
           <small>Si<sub>3</sub>N<sub>4</sub> wall between nMOS and pMOS. Sets the device separation and the well split plane.</small>
         </div>
       </div>
@@ -83,42 +124,46 @@
 
         <div class="field">
           <label for="gen-mode">Mode</label>
-          <select id="gen-mode">
-            <option value="single">Single geometry case</option>
-            <option value="one_at_a_time">Sweep &mdash; one parameter at a time</option>
-            <option value="full_grid">Sweep &mdash; full grid</option>
-          </select>
+          <div class="ctl">
+            <select id="gen-mode">
+              <option value="single">Single geometry case</option>
+              <option value="one_at_a_time">Sweep &mdash; one parameter at a time</option>
+              <option value="full_grid">Sweep &mdash; full grid</option>
+            </select>
+          </div>
           <small>One at a time varies each parameter while holding the other two at the values above. Full grid takes every combination.</small>
         </div>
 
         <div id="sweep-fields">
           <div class="field">
             <label for="sweep-T_NS">T_NS values</label>
-            <input id="sweep-T_NS" type="text" value="0.004, 0.005, 0.006">
+            <div class="ctl"><input id="sweep-T_NS" type="text" value="0.004, 0.005, 0.006"></div>
             <small>comma separated</small>
           </div>
           <div class="field">
             <label for="sweep-W_NS">W_NS values</label>
-            <input id="sweep-W_NS" type="text" value="0.015, 0.020, 0.025">
+            <div class="ctl"><input id="sweep-W_NS" type="text" value="0.015, 0.020, 0.025"></div>
           </div>
           <div class="field">
             <label for="sweep-T_FORK">T_FORK values</label>
-            <input id="sweep-T_FORK" type="text" value="0.006, 0.008, 0.010">
+            <div class="ctl"><input id="sweep-T_FORK" type="text" value="0.006, 0.008, 0.010"></div>
           </div>
         </div>
 
         <div class="field">
           <label for="mesh-prefix-mode">Mesh prefix</label>
-          <select id="mesh-prefix-mode">
-            <option value="auto">auto &mdash; name the mesh after the case</option>
-            <option value="custom">custom &mdash; fixed name</option>
-          </select>
+          <div class="ctl">
+            <select id="mesh-prefix-mode">
+              <option value="auto">auto &mdash; name the mesh after the case</option>
+              <option value="custom">custom &mdash; fixed name</option>
+            </select>
+          </div>
           <small>auto keeps sweep runs from overwriting each other. A fixed name such as fork1108 matches an existing sdevice.cmd Grid entry.</small>
         </div>
 
         <div class="field">
           <label for="mesh-prefix-custom">Custom prefix</label>
-          <input id="mesh-prefix-custom" type="text" value="fork1108" disabled>
+          <div class="ctl"><input id="mesh-prefix-custom" type="text" value="fork1108" disabled></div>
           <small>writes &lt;prefix&gt;_msh.tdr</small>
         </div>
       </div>
@@ -137,51 +182,51 @@
         <div class="grid2">
           <div class="field compact">
             <label for="L_PAD">L_PAD &mdash; source/drain pad length</label>
-            <input id="L_PAD" type="number" step="0.001" value="0.025"><span class="unit">&micro;m</span>
+            <div class="ctl"><input id="L_PAD" type="number" step="0.001" value="0.025"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="T_SPACER">T_SPACER &mdash; spacer thickness</label>
-            <input id="T_SPACER" type="number" step="0.001" value="0.005"><span class="unit">&micro;m</span>
+            <div class="ctl"><input id="T_SPACER" type="number" step="0.001" value="0.005"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="L_G">L_G &mdash; gate length</label>
-            <input id="L_G" type="number" step="0.001" value="0.020"><span class="unit">&micro;m</span>
+            <div class="ctl"><input id="L_G" type="number" step="0.001" value="0.020"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="T_HFO2">T_HFO2 &mdash; HfO<sub>2</sub> collar</label>
-            <input id="T_HFO2" type="number" step="0.001" value="0.002"><span class="unit">&micro;m</span>
+            <div class="ctl"><input id="T_HFO2" type="number" step="0.001" value="0.002"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="T_METAL">T_METAL &mdash; gate metal in each gap</label>
-            <input id="T_METAL" type="number" step="0.001" value="0.006"><span class="unit">&micro;m</span>
+            <div class="ctl"><input id="T_METAL" type="number" step="0.001" value="0.006"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="T_LINER">T_LINER &mdash; SiO<sub>2</sub> gate liner</label>
-            <input id="T_LINER" type="number" step="0.001" value="0.002"><span class="unit">&micro;m</span>
+            <div class="ctl"><input id="T_LINER" type="number" step="0.001" value="0.002"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="T_BRIDGE">T_BRIDGE &mdash; gate bridge thickness</label>
-            <input id="T_BRIDGE" type="number" step="0.001" value="0.010"><span class="unit">&micro;m</span>
+            <div class="ctl"><input id="T_BRIDGE" type="number" step="0.001" value="0.010"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="T_SUB">T_SUB &mdash; substrate depth</label>
-            <input id="T_SUB" type="number" step="0.01" value="0.150"><span class="unit">&micro;m</span>
+            <div class="ctl"><input id="T_SUB" type="number" step="0.01" value="0.150"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="T_WELL">T_WELL &mdash; well depth</label>
-            <input id="T_WELL" type="number" step="0.01" value="0.100"><span class="unit">&micro;m</span>
+            <div class="ctl"><input id="T_WELL" type="number" step="0.01" value="0.100"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="MESH_MIN_X">MESH_MIN_X</label>
-            <input id="MESH_MIN_X" type="number" step="0.001" value="0.003"><span class="unit">&micro;m</span>
+            <div class="ctl"><input id="MESH_MIN_X" type="number" step="0.001" value="0.003"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="MESH_MIN_Y">MESH_MIN_Y</label>
-            <input id="MESH_MIN_Y" type="number" step="0.001" value="0.001"><span class="unit">&micro;m</span>
+            <div class="ctl"><input id="MESH_MIN_Y" type="number" step="0.001" value="0.001"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="MESH_MIN_Z">MESH_MIN_Z</label>
-            <input id="MESH_MIN_Z" type="number" step="0.001" value="0.003"><span class="unit">&micro;m</span>
+            <div class="ctl"><input id="MESH_MIN_Z" type="number" step="0.001" value="0.003"><span class="unit">&micro;m</span></div>
           </div>
         </div>
       </div>
@@ -190,10 +235,10 @@
     <!-- ---------- actions ---------- -->
     <div class="card">
       <div class="section-body actions">
-        <button id="btn-generate" class="btn primary">Generate</button>
-        <button id="btn-download" class="btn" disabled>Download .scm</button>
-        <button id="btn-reset" class="btn">Reset</button>
-        <button id="btn-copy" class="btn ghost">Copy SCM</button>
+        <button id="btn-generate" class="btn primary" type="button">Generate</button>
+        <button id="btn-download" class="btn" type="button" disabled>Download .scm</button>
+        <button id="btn-reset" class="btn" type="button">Reset</button>
+        <button id="btn-copy" class="btn ghost" type="button">Copy SCM</button>
       </div>
     </div>
 
@@ -206,59 +251,108 @@
     <div class="card">
       <div class="section-head"><h2>Computed geometry</h2><span class="chev"></span></div>
       <div class="section-body">
-        <table class="kv"><tbody id="summary-body">
-          <tr><td colspan="2" class="dim">-</td></tr>
-        </tbody></table>
+        <div class="table-scroll">
+          <table class="kv"><tbody id="summary-body">
+            <tr><td colspan="2" class="dim">-</td></tr>
+          </tbody></table>
+        </div>
       </div>
     </div>
 
+    </div><!-- /.sidebar-inner -->
   </section>
 
-  <!-- ==================== live 3D preview ==================== -->
-  <section id="preview-section">
-    <div class="preview-head">
-      <h2>Live preview</h2>
-      <div class="preview-tools">
-        <span class="tool-label">View</span>
-        <button class="btn small" data-view="front">Front</button>
-        <button class="btn small" data-view="back">Back</button>
-        <button class="btn small" data-view="left">Left</button>
-        <button class="btn small" data-view="right">Right</button>
-        <button class="btn small" data-view="top">Top</button>
-        <button class="btn small" data-view="bottom">Bottom</button>
-        <button class="btn small" data-view="iso">Isometric</button>
-        <button class="btn small" id="btn-reset-cam">Reset</button>
+  <!-- draggable divider: sets the left sidebar width on desktop -->
+  <div id="resizer-left" class="resizer" role="separator" aria-orientation="vertical"
+       aria-label="Resize the parameters panel" tabindex="0" title="Drag to resize"></div>
 
-        <span class="tool-label">Projection</span>
-        <select id="sel-projection">
-          <option value="perspective">Perspective</option>
-          <option value="orthographic">Orthographic</option>
-        </select>
+  <!-- ==================== centre workspace ==================== -->
+  <div id="main-col">
 
-        <span class="tool-label">Mode</span>
-        <select id="sel-style">
-          <option value="surface">Surface</option>
-          <option value="wireframe">Wireframe</option>
-        </select>
+    <!-- ------------------ live 3D preview ------------------ -->
+    <section id="preview-section">
+      <div class="preview-head">
+        <h2 class="preview-title">Live preview</h2>
+        <div class="preview-tools">
+          <div class="tool-group">
+            <span class="tool-label">View</span>
+            <button class="btn tiny" type="button" data-view="front">Front</button>
+            <button class="btn tiny" type="button" data-view="back">Back</button>
+            <button class="btn tiny" type="button" data-view="left">Left</button>
+            <button class="btn tiny" type="button" data-view="right">Right</button>
+            <button class="btn tiny" type="button" data-view="top">Top</button>
+            <button class="btn tiny" type="button" data-view="bottom">Bottom</button>
+            <button class="btn tiny" type="button" data-view="iso">Iso</button>
+            <button class="btn tiny" type="button" id="btn-reset-cam">Reset</button>
+          </div>
 
-        <span class="tool-label">Opacity</span>
-        <input id="opacity" type="range" min="10" max="100" value="100">
+          <div class="tool-group">
+            <span class="tool-label">Projection</span>
+            <select id="sel-projection">
+              <option value="perspective">Perspective</option>
+              <option value="orthographic">Orthographic</option>
+            </select>
+          </div>
 
-        <label class="chk"><input type="checkbox" id="chk-edges" checked> Edges</label>
-        <label class="chk"><input type="checkbox" id="chk-axes" checked> Axes</label>
-      </div>
-    </div>
+          <div class="tool-group">
+            <span class="tool-label">Mode</span>
+            <select id="sel-style">
+              <option value="surface">Surface</option>
+              <option value="wireframe">Wireframe</option>
+            </select>
+          </div>
 
-    <div class="preview-body">
-      <div id="viewport">
-        <div id="viewer-hint" class="hint">
-          building preview&hellip;
-          <span class="dim">left-drag rotate &middot; right-drag pan &middot; scroll zoom &middot; click a region</span>
+          <div class="tool-group">
+            <span class="tool-label">Opacity</span>
+            <input id="opacity" type="range" min="10" max="100" value="100">
+          </div>
+
+          <div class="tool-group">
+            <label class="chk"><input type="checkbox" id="chk-edges" checked> Edges</label>
+            <label class="chk"><input type="checkbox" id="chk-axes" checked> Axes</label>
+          </div>
         </div>
       </div>
 
-      <aside id="inspector">
-        <div class="panel-title">Selected region</div>
+      <div class="preview-body">
+        <div id="viewport">
+          <div id="viewer-hint" class="hint">
+            building preview&hellip;
+            <span class="dim">left-drag rotate &middot; right-drag pan &middot; scroll zoom &middot; click a region</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ------------------ generated SCM text ------------------ -->
+    <section id="scm-section" class="card">
+      <div class="section-head">
+        <h2>Generated SCM <span id="scm-lines" class="dim"></span></h2>
+        <span class="chev"></span>
+      </div>
+      <div class="section-body">
+        <pre id="scm-preview"></pre>
+      </div>
+    </section>
+
+  </div><!-- /#main-col -->
+
+  <!-- draggable divider: sets the right sidebar width on desktop -->
+  <div id="resizer-right" class="resizer" role="separator" aria-orientation="vertical"
+       aria-label="Resize the inspector panel" tabindex="0" title="Drag to resize"></div>
+
+  <!-- ================= right sidebar: inspector ================= -->
+  <aside id="inspector" class="sidebar" aria-label="Region inspector">
+    <div class="sidebar-inner">
+      <!-- shown only in drawer (mobile) mode -->
+      <div class="drawer-head">
+        <span>Inspector</span>
+        <button class="drawer-close" type="button" data-close="inspector"
+                aria-label="Close the inspector panel">&times;</button>
+      </div>
+
+      <div class="panel-title"><span>Selected region</span></div>
+      <div class="panel-body">
         <table class="kv" id="region-info"><tbody>
           <tr><th>Name</th><td data-f="name">-</td></tr>
           <tr><th>Material</th><td data-f="material">-</td></tr>
@@ -273,25 +367,19 @@
           <tr><th>Z length</th><td data-f="lz">-</td></tr>
           <tr><th>Volume</th><td data-f="volume">-</td></tr>
         </tbody></table>
+      </div>
 
-        <div class="panel-title">Materials</div>
+      <div class="panel-title"><span>Materials</span></div>
+      <div class="panel-body">
         <ul id="legend" class="legend"></ul>
-      </aside>
+      </div>
     </div>
-  </section>
+  </aside>
 
-  <!-- ==================== generated SCM text ==================== -->
-  <section id="scm-section" class="card">
-    <div class="section-head">
-      <h2>Generated SCM <span id="scm-lines" class="dim"></span></h2>
-      <span class="chev"></span>
-    </div>
-    <div class="section-body">
-      <pre id="scm-preview"></pre>
-    </div>
-  </section>
+</div><!-- /#page -->
 
-</div>
+<!-- scrim behind the mobile drawers -->
+<div id="drawer-scrim" hidden></div>
 
 <footer id="foot">
   Parametric Forksheet CMOS generator &middot; output is compatible with the

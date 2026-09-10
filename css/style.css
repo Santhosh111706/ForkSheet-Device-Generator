@@ -2,13 +2,23 @@
    css/style.css
    Forksheet CMOS SCM Generator - dark engineering / TCAD interface
 
-   Page layout
-     #titlebar
-     #page
-       #controls           generator inputs, scrollable
-       #preview-section    large 3D preview plus inspector
-       #scm-section        generated SCM text
+   LAYOUT SYSTEM (one system, no duplicates)
+   --------------------------------------------------------------------------
+   The window is a fixed-height flex column:
+
+     #titlebar                       compact, never wraps (ellipsis instead)
+     #page            flex row       the work area
+       #controls      .sidebar       left  - parameters, own scroll, resizable
+       #resizer-left  .resizer       drag handle
+       #main-col                     centre - preview (grows) + SCM (bounded)
+       #resizer-right .resizer       drag handle
+       #inspector     .sidebar       right - region info, own scroll, resizable
      #foot
+
+   Desktop widths live in --sidebar-l / --sidebar-r, written by generator.js.
+   Below 1000px the two sidebars become off-canvas drawers over a scrim and
+   the centre column takes the whole width; the same CSS variables are simply
+   ignored, so there is only ever one layout implementation in play.
    ========================================================================== */
 
 :root {
@@ -28,52 +38,99 @@
   --radius:   6px;
   --mono: "SF Mono", "JetBrains Mono", "Fira Code", Consolas, monospace;
   --sans: "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
+
+  /* layout metrics - the drag handles write the two sidebar widths */
+  --sidebar-l: 380px;
+  --sidebar-r: 260px;
+  --header-h:  46px;          /* measured at runtime by generator.js */
+  --gap:       12px;
+  --pad:       12px;
 }
 
 * { box-sizing: border-box; }
 
-html, body {
+html { height: 100%; }
+
+body {
   margin: 0;
-  min-height: 100%;
+  height: 100dvh;             /* dvh tracks the Android URL bar correctly */
+  display: flex;
+  flex-direction: column;
   background: var(--bg-0);
   color: var(--fg);
   font-family: var(--sans);
   font-size: 13.5px;
   line-height: 1.5;
+  overflow: hidden;           /* panels scroll, the page itself does not */
+  -webkit-text-size-adjust: 100%;
+}
+
+/* fallback for browsers without dvh */
+@supports not (height: 100dvh) {
+  body { height: 100vh; }
 }
 
 h2 { margin: 0; font-size: 12.5px; font-weight: 600; letter-spacing: .4px; }
 .dim { color: var(--fg-dim); }
 
-/* ------------------------------------------------------------- titlebar */
+/* ==========================================================================
+   Header
+   Single row, never wraps. Long text is clipped with an ellipsis rather than
+   pushed onto a second line, which is what used to make the bar grow on a
+   1366px laptop.
+   ========================================================================== */
 #titlebar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 11px 18px;
+  flex-wrap: nowrap;
+  gap: 12px;
+  padding: 7px 14px;
+  min-height: 46px;
   background: linear-gradient(180deg, #1d242c, #151a21);
   border-bottom: 1px solid var(--line);
-  position: sticky;
-  top: 0;
-  z-index: 30;
+  z-index: 70;
 }
+
 .brand {
+  flex: 0 1 auto;
+  min-width: 0;
   font-weight: 600;
-  font-size: 15px;
+  font-size: 14.5px;
   display: flex;
   align-items: center;
   gap: 9px;
-  white-space: nowrap;
 }
+.brand-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .brand .dot {
+  flex: 0 0 auto;
   width: 9px; height: 9px; border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 9px var(--accent);
 }
-.subtitle { font-size: 12px; color: var(--fg-dim); }
-.header-right { margin-left: auto; }
-.privacy {
+
+.subtitle {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 11.5px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-left: 1px solid var(--line-2);
+  padding-left: 12px;
+}
+
+.header-right {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.privacy {
+  font-size: 11px;
   color: var(--ok);
   border: 1px solid rgba(53,196,106,.35);
   background: rgba(53,196,106,.08);
@@ -82,22 +139,148 @@ h2 { margin: 0; font-size: 12.5px; font-weight: 600; letter-spacing: .4px; }
   white-space: nowrap;
 }
 
-/* ------------------------------------------------------------- page grid */
+/* panel toggle buttons, left and right */
+.icon-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  min-height: 30px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.icon-btn:hover { background: var(--bg-3); border-color: var(--accent); }
+.icon-btn[aria-expanded="false"] { color: var(--fg-dim); }
+.icon-btn .ico {
+  position: relative;
+  display: block;
+  width: 15px; height: 12px;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+  opacity: .9;
+}
+.icon-btn .ico::before {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 4px;
+  background: currentColor;
+}
+#btn-toggle-controls  .ico::before { left: 0; }
+#btn-toggle-inspector .ico::before { right: 0; }
+
+/* ==========================================================================
+   Work area
+   ========================================================================== */
 #page {
-  display: grid;
-  grid-template-columns: 400px minmax(0, 1fr);
-  grid-template-areas:
-    "controls preview"
-    "controls scm";
-  gap: 14px;
-  padding: 14px;
-  align-items: start;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  padding: var(--pad);
+  gap: 0;
+  overflow: hidden;           /* no page-level horizontal overflow, ever */
 }
 
-#controls        { grid-area: controls; display: flex; flex-direction: column; gap: 12px;
-                   max-height: calc(100vh - 100px); overflow-y: auto; padding-right: 4px; }
-#preview-section { grid-area: preview; }
-#scm-section     { grid-area: scm; }
+/* ------------------------------------------------------------- sidebars */
+.sidebar {
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;           /* the WHOLE sidebar scrolls, as one area */
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+#controls  { width: var(--sidebar-l); }
+#inspector {
+  width: var(--sidebar-r);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+/* padding lives on the inner wrapper so it does not fight the scrollbar */
+.sidebar-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-height: 100%;
+}
+#controls .sidebar-inner  { padding-right: 8px; }
+#inspector .sidebar-inner { gap: 0; }
+
+/* desktop: the header buttons collapse a whole column away */
+body.hide-left  #controls,  body.hide-left  #resizer-left  { display: none; }
+body.hide-right #inspector, body.hide-right #resizer-right { display: none; }
+
+/* the drawer header only exists in drawer (mobile) mode */
+.drawer-head { display: none; }
+
+/* ------------------------------------------------------------- resizers */
+.resizer {
+  flex: 0 0 12px;
+  align-self: stretch;
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+  border-radius: 3px;
+  transition: background .12s;
+  touch-action: none;
+}
+.resizer::after {                 /* the visible grip */
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 54px;
+  border-radius: 3px;
+  background: var(--line-2);
+  transition: background .12s, height .12s;
+}
+.resizer::before {                /* widened hit area, invisible */
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  left: -3px; right: -3px;
+}
+.resizer:hover,
+.resizer:focus-visible { background: rgba(76,141,255,.10); outline: none; }
+.resizer:hover::after,
+.resizer:focus-visible::after { background: var(--accent); height: 96px; }
+.resizer.dragging { background: rgba(76,141,255,.16); }
+.resizer.dragging::after { background: var(--accent); height: 100%; }
+
+/* while dragging, stop the canvas swallowing pointer events */
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing canvas,
+body.resizing iframe { pointer-events: none; }
+
+/* ==========================================================================
+   Centre column: preview grows, generated SCM is bounded underneath
+   ========================================================================== */
+#main-col {
+  flex: 1 1 auto;
+  min-width: 0;               /* critical: lets the column actually shrink */
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  overflow-y: auto;           /* safety net: scroll rather than clip */
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
 
 /* ------------------------------------------------------------- cards */
 .card {
@@ -117,10 +300,19 @@ h2 { margin: 0; font-size: 12.5px; font-weight: 600; letter-spacing: .4px; }
   cursor: pointer;
   user-select: none;
 }
-.section-head h2 { text-transform: uppercase; color: var(--fg-dim); font-size: 11px; letter-spacing: 1px; }
+.section-head h2 {
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  font-size: 11px;
+  letter-spacing: 1px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .section-head:hover h2 { color: var(--fg); }
 .chev {
   margin-left: auto;
+  flex: 0 0 auto;
   width: 0; height: 0;
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
@@ -139,32 +331,44 @@ h2 { margin: 0; font-size: 12.5px; font-weight: 600; letter-spacing: .4px; }
 }
 
 /* ------------------------------------------------------------- fields */
-.field { margin-bottom: 13px; }
+.field { margin-bottom: 13px; min-width: 0; }
 .field:last-child { margin-bottom: 0; }
 .field label {
   display: block;
   font-size: 12px;
   font-weight: 500;
-  margin-bottom: 4px;
+  margin-bottom: 5px;
+  color: var(--fg);
 }
 .field small {
   display: block;
-  margin-top: 3px;
+  margin-top: 4px;
   font-size: 11px;
   color: var(--fg-dim);
   line-height: 1.5;
 }
-.field .unit {
+
+/* input + unit sit on one flex row, so the unit can never push the input
+   out of the card and no calc() guess about its width is needed */
+.ctl {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.ctl > input,
+.ctl > select { flex: 1 1 auto; min-width: 0; }
+.ctl > .unit {
+  flex: 0 0 auto;
   font-size: 11px;
   color: var(--fg-dim);
-  margin-left: 6px;
   font-family: var(--mono);
 }
 
-.field.compact { margin-bottom: 9px; }
+.field.compact { margin-bottom: 10px; }
 .field.compact label { font-size: 11px; }
 
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 12px; }
 
 input[type="number"], input[type="text"], select {
   width: 100%;
@@ -176,15 +380,16 @@ input[type="number"], input[type="text"], select {
   font-family: var(--mono);
   font-size: 12.5px;
   outline: none;
+  transition: border-color .12s, box-shadow .12s;
 }
-.field .unit + small { margin-top: 3px; }
-.field input[type="number"] { display: inline-block; width: calc(100% - 34px); }
-.field.compact input[type="number"] { width: calc(100% - 30px); }
-input:focus, select:focus { border-color: var(--accent); }
+input:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(76,141,255,.18);
+}
 input:disabled { opacity: .45; cursor: not-allowed; }
 select { font-family: var(--sans); }
 
-input[type="range"] { width: 100px; accent-color: var(--accent); }
+input[type="range"] { width: 96px; min-width: 70px; accent-color: var(--accent); }
 input[type="checkbox"] { accent-color: var(--accent); }
 
 /* ------------------------------------------------------------- buttons */
@@ -203,10 +408,16 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .btn:hover:not(:disabled)  { background: var(--bg-3); border-color: var(--accent); }
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: .42; cursor: not-allowed; }
-.btn.primary { background: var(--accent-2); border-color: var(--accent); font-weight: 600; }
-.btn.primary:hover { background: var(--accent); }
+.btn.primary {
+  background: var(--accent-2);
+  border-color: var(--accent);
+  font-weight: 600;
+  color: #fff;
+}
+.btn.primary:hover:not(:disabled) { background: var(--accent); }
 .btn.ghost { background: transparent; }
-.btn.small { padding: 4px 9px; font-size: 11.5px; }
+.btn.small { padding: 5px 10px; font-size: 12px; min-height: 30px; }
+.btn.tiny  { padding: 4px 9px; font-size: 11.5px; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .actions .btn { flex: 1 1 auto; }
@@ -219,6 +430,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
   padding: 10px 12px;
   background: var(--bg-1);
   font-size: 12px;
+  flex: 0 0 auto;
 }
 .status-title { font-weight: 600; font-size: 12.5px; }
 .status-list {
@@ -228,8 +440,10 @@ input[type="checkbox"] { accent-color: var(--accent); }
   font-family: var(--mono);
   font-size: 11px;
   line-height: 1.7;
-  max-height: 190px;
-  overflow: auto;
+  /* No max-height and no scrollbar of its own: the sidebar is already one
+     scrolling area, so a long sweep report simply makes it taller instead
+     of hiding rows behind a second, easily-missed scroll region. */
+  overflow-wrap: anywhere;
 }
 .status.ok    { border-left-color: var(--ok); }
 .status.ok    .status-title { color: var(--ok); }
@@ -239,27 +453,36 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .status.error .status-title { color: var(--err); }
 
 /* ------------------------------------------------------------- kv table */
-.kv { width: 100%; border-collapse: collapse; font-size: 12px; }
+.table-scroll { overflow-x: auto; }
+.kv { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
 .kv th {
   text-align: left;
   font-weight: 500;
   color: var(--fg-dim);
-  padding: 4px 8px 4px 0;
-  white-space: nowrap;
-  width: 45%;
+  padding: 5px 8px 5px 0;
+  width: 44%;
   border-bottom: 1px solid #1f252d;
   font-size: 11.5px;
+  overflow-wrap: anywhere;
 }
 .kv td {
   font-family: var(--mono);
   font-size: 11.5px;
-  padding: 4px 0;
+  padding: 5px 0;
   border-bottom: 1px solid #1f252d;
-  word-break: break-all;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
+.kv tr:last-child th, .kv tr:last-child td { border-bottom: none; }
 
-/* ------------------------------------------------------------- preview */
+/* ==========================================================================
+   Preview
+   The preview takes every pixel the centre column can spare; the SCM panel
+   below it is capped so it can never squeeze the canvas away.
+   ========================================================================== */
 #preview-section {
+  flex: 1 1 auto;
+  min-height: 240px;
   background: var(--bg-1);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -269,11 +492,12 @@ input[type="checkbox"] { accent-color: var(--accent); }
 }
 
 .preview-head {
-  padding: 9px 12px;
+  flex: 0 0 auto;
+  padding: 8px 12px;
   background: var(--bg-2);
   border-bottom: 1px solid var(--line);
 }
-.preview-head h2 {
+.preview-title {
   text-transform: uppercase;
   color: var(--fg-dim);
   font-size: 11px;
@@ -284,25 +508,39 @@ input[type="checkbox"] { accent-color: var(--accent); }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
+  gap: 6px 10px;
 }
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-right: 10px;
+  border-right: 1px solid var(--line);
+}
+.tool-group:last-child { border-right: none; padding-right: 0; }
 .tool-label {
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: .8px;
   color: var(--fg-dim);
+  white-space: nowrap;
 }
-.chk { display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; }
+.chk { display: flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .preview-tools select { width: auto; padding: 4px 7px; font-size: 11.5px; }
 
-.preview-body { display: flex; min-height: 0; }
+.preview-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
 
 #viewport {
   flex: 1 1 auto;
   position: relative;
-  height: 620px;
   min-width: 0;
+  min-height: 0;
   background: var(--bg-0);
+  touch-action: none;         /* the orbit controller owns touch gestures */
 }
 #viewport canvas { display: block; }
 
@@ -315,19 +553,18 @@ input[type="checkbox"] { accent-color: var(--accent); }
   pointer-events: none;
   font-size: 13px;
   line-height: 2;
+  width: 100%;
+  padding: 0 12px;
 }
 .hint .dim { display: block; font-size: 11.5px; }
 .hint.err { color: var(--err); pointer-events: auto; }
 
-#inspector {
-  flex: 0 0 250px;
-  border-left: 1px solid var(--line);
-  background: var(--bg-1);
-  overflow-y: auto;
-  max-height: 620px;
-}
+/* ------------------------------------------------------------- inspector */
 .panel-title {
-  padding: 7px 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 1.1px;
@@ -336,18 +573,21 @@ input[type="checkbox"] { accent-color: var(--accent); }
   background: var(--bg-2);
   border-bottom: 1px solid var(--line);
   border-top: 1px solid var(--line);
+  position: sticky;           /* section headers stay readable while scrolling */
+  top: 0;
+  z-index: 2;
 }
-#inspector .panel-title:first-child { border-top: none; }
-#inspector .kv { padding: 0 10px; }
-#inspector table { margin: 8px 10px; width: calc(100% - 20px); }
+.sidebar-inner > .panel-title:first-child { border-top: none; }
+.panel-body { padding: 9px 11px; }
 
-.legend { list-style: none; margin: 8px 10px; padding: 0; }
+.legend { list-style: none; margin: 0; padding: 0; }
 .legend li {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 3px 0;
   font-size: 12px;
+  min-width: 0;
 }
 .swatch {
   width: 13px; height: 13px;
@@ -355,12 +595,47 @@ input[type="checkbox"] { accent-color: var(--accent); }
   border: 1px solid rgba(255,255,255,.25);
   flex: 0 0 auto;
 }
-.lname  { flex: 1 1 auto; font-family: var(--mono); font-size: 11.5px; }
-.lcount { color: var(--fg-dim); font-size: 11px; }
+.lname  { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.lcount { flex: 0 0 auto; color: var(--fg-dim); font-size: 11px; }
 
-/* ------------------------------------------------------------- scm text */
+/* close button, drawer mode only */
+.drawer-close {
+  margin-left: auto;
+  display: none;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 18px;
+  line-height: 1;
+  width: 34px; height: 34px;
+  cursor: pointer;
+}
+.drawer-close:hover { border-color: var(--accent); }
+
+/* ==========================================================================
+   Generated SCM
+   ========================================================================== */
+#scm-section {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(38%, 340px);
+  display: flex;
+  flex-direction: column;
+}
+#scm-section .section-head { flex: 0 0 auto; }
+#scm-section .section-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+#scm-section.collapsed { max-height: none; }
+
 #scm-preview {
+  flex: 1 1 auto;
   margin: 0;
+  min-height: 84px;
+  min-width: 0;
   padding: 12px;
   background: var(--bg-0);
   border: 1px solid var(--line);
@@ -369,10 +644,10 @@ input[type="checkbox"] { accent-color: var(--accent); }
   font-size: 11.5px;
   line-height: 1.55;
   color: #b9c4d0;
-  max-height: 420px;
   overflow: auto;
   white-space: pre;
   tab-size: 2;
+  overscroll-behavior: contain;
 }
 #scm-preview:empty::before {
   content: "press Generate to produce the SCM text";
@@ -383,50 +658,204 @@ input[type="checkbox"] { accent-color: var(--accent); }
 
 /* ------------------------------------------------------------- footer */
 #foot {
-  padding: 14px 18px 22px;
+  flex: 0 0 auto;
+  padding: 7px 18px;
   text-align: center;
   color: var(--fg-dim);
-  font-size: 11.5px;
+  font-size: 11px;
   border-top: 1px solid var(--line);
-  margin-top: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+
+/* ------------------------------------------------------------- scrim */
+#drawer-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 9, 13, .62);
+  z-index: 55;
+  border: 0;
+  animation: scrim-in .16s ease;
+}
+@keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* ------------------------------------------------------------- scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--bg-1); }
 ::-webkit-scrollbar-thumb { background: #2e3742; border-radius: 5px; border: 2px solid var(--bg-1); }
 ::-webkit-scrollbar-thumb:hover { background: #3a4552; }
+.sidebar, #main-col, #scm-preview { scrollbar-width: thin; scrollbar-color: #2e3742 var(--bg-1); }
 
 /* ==========================================================================
    Responsive
+   --------------------------------------------------------------------------
+     <= 1500px   drop the header subtitle before it can squeeze the buttons
+     <= 1240px   tighter gutters, narrower default sidebars
+     <= 1000px   DRAWER MODE: both sidebars become off-canvas panels, the
+                 centre column takes the whole width
+     <=  760px   phone: taller touch targets, single-row scrolling toolbar
+     <=  480px   very narrow phone
    ========================================================================== */
 
-@media (max-width: 1250px) {
-  #page { grid-template-columns: 340px minmax(0, 1fr); }
-  #inspector { flex-basis: 215px; }
+@media (max-width: 1500px) {
+  .subtitle { display: none; }
 }
 
-/* stack: controls above, preview below, both full width */
+@media (max-width: 1240px) {
+  :root { --pad: 9px; --gap: 9px; }
+  .privacy { display: none; }
+  .resizer { flex-basis: 10px; }
+}
+
+/* ---------------------------------------------------------- drawer mode */
 @media (max-width: 1000px) {
-  #page {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "controls" "preview" "scm";
+  #page { padding: 8px; }
+
+  .resizer { display: none; }
+
+  /* Both sidebars slide in over the workspace, below the header.
+     These live on the ID selectors, not on .sidebar, so they outrank the
+     desktop `#controls { width: var(--sidebar-l) }` rule instead of losing
+     to it on specificity. */
+  #controls, #inspector {
+    position: fixed;
+    top: var(--header-h);
+    bottom: 0;
+    z-index: 60;
+    width: min(88vw, 400px);
+    max-width: 100vw;
+    height: auto;
+    background: var(--bg-0);
+    border: 0;
+    border-radius: 0;
+    box-shadow: 0 18px 44px rgba(0,0,0,.55);
+    transition: transform .22s ease;
+    will-change: transform;
   }
-  #controls { max-height: none; overflow: visible; }
-  #viewport { height: 480px; }
-  #inspector { max-height: 480px; }
+  #controls  { left: 0;  right: auto; transform: translateX(-101%); border-right: 1px solid var(--line); }
+  #inspector { right: 0; left: auto;  transform: translateX(101%);  border-left: 1px solid var(--line); }
+  #controls.open, #inspector.open { transform: translateX(0); }
+
+  /* the desktop collapse classes must not hide a drawer */
+  body.hide-left #controls, body.hide-right #inspector { display: block; }
+  body.hide-left #resizer-left, body.hide-right #resizer-right { display: none; }
+
+  .sidebar-inner { padding: 8px; min-height: 0; }
+  #controls .sidebar-inner  { padding-right: 8px; }
+  #inspector .sidebar-inner { padding: 0; gap: 0; }
+
+  .drawer-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    margin: -8px -8px 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.1px;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    z-index: 3;
+  }
+  #inspector .drawer-head { margin: 0; }
+  .drawer-close { display: inline-flex; align-items: center; justify-content: center; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar { transition: none; }
+  }
 }
 
-@media (max-width: 700px) {
-  .subtitle, .privacy { display: none; }
+/* ------------------------------------------------------- phones / portrait */
+@media (max-width: 760px) {
+  .icon-btn-text { display: none; }        /* icon-only panel toggles */
+  .icon-btn { padding: 8px 10px; min-height: 40px; }
+  .brand-name { font-size: 13px; }
+  #titlebar { gap: 8px; padding: 6px 10px; }
+  .header-right { gap: 6px; }
+
   .grid2 { grid-template-columns: 1fr; }
-  .preview-body { flex-direction: column; }
-  #inspector {
-    flex: 1 1 auto;
-    border-left: none;
-    border-top: 1px solid var(--line);
-    max-height: 300px;
+
+  /* the toolbar scrolls sideways instead of stacking and eating the canvas */
+  .preview-tools {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 4px;
+    scrollbar-width: thin;
   }
-  #viewport { height: 380px; }
-  .tool-label { display: none; }
+  .tool-group { flex: 0 0 auto; }
+  .preview-title { margin-bottom: 6px; }
+
+  /* touch targets at the 44px accessibility minimum */
+  .btn { min-height: 44px; padding: 10px 14px; font-size: 13.5px; }
+  .btn.small { min-height: 40px; padding: 9px 12px; font-size: 12.5px; }
+  .btn.tiny  { min-height: 36px; padding: 8px 11px; font-size: 12px; }
+
+  input[type="number"], input[type="text"], select {
+    min-height: 44px;
+    font-size: 16px;          /* stops mobile browsers zooming on focus */
+    padding: 9px 10px;
+  }
+  input[type="range"] { width: 130px; min-height: 36px; }
+  .chk { min-height: 40px; }
+  .section-head { padding: 12px; }         /* easier to tap to collapse */
+
+  .actions { gap: 9px; }
+  .actions .btn { flex: 1 1 46%; }
+
+  #scm-section { max-height: min(46%, 300px); }
+  #foot { font-size: 10.5px; padding: 6px 10px; }
+}
+
+@media (max-width: 480px) {
+  #btn-download-top { display: none; }     /* keep Generate, drop the rest */
+  #page { padding: 6px; }
+  .actions .btn { flex: 1 1 100%; }
+  #controls, #inspector { width: 92vw; }
+}
+
+/* --------------------------------------------------------- landscape phone */
+/* Very little vertical room, so every fixed chrome element is trimmed and
+   the canvas gets what is left. The toolbar becomes one sideways-scrolling
+   row rather than two stacked ones, which alone is worth ~30px of canvas. */
+@media (max-height: 560px) and (orientation: landscape) {
+  #titlebar { min-height: 40px; padding: 4px 10px; }
+  .icon-btn { min-height: 32px; }
+  #foot { display: none; }                 /* reclaim the vertical space */
+
+  .preview-head { padding: 5px 10px; }
+  .preview-title { display: none; }
+  .preview-tools {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 3px;
+  }
+  .tool-group { flex: 0 0 auto; }
+
+  #preview-section { min-height: 170px; }
+  #scm-section { max-height: 118px; }
+  #scm-preview { min-height: 40px; }
+
+  .btn { min-height: 34px; padding: 6px 11px; }
+  .btn.tiny { min-height: 30px; padding: 5px 9px; }
+  input[type="number"], input[type="text"], select { min-height: 36px; }
+  .chk { min-height: 30px; }
+}
+
+/* ------------------------------------------------- coarse pointers (touch) */
+@media (pointer: coarse) {
+  .resizer { display: none; }              /* no hover, no drag affordance */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+}
+
+/* ------------------------------------------------------- reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+  .sidebar { scroll-behavior: auto; }
 }

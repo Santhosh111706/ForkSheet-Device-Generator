@@ -45,6 +45,8 @@
   const edges = [];
 
   let pressPos = null;          // for distinguishing a click from a drag
+  let lastW = 0, lastH = 0;     // last host size handed to the renderer
+  let hostObserver = null;      // ResizeObserver on the viewport element
 
   const $ = (s) => document.querySelector(s);
 
@@ -136,7 +138,7 @@
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(hostEl.clientWidth, Math.max(hostEl.clientHeight, 1));
+    renderer.setSize(Math.max(hostEl.clientWidth, 1), Math.max(hostEl.clientHeight, 1));
     hostEl.appendChild(renderer.domElement);
 
     scene = new THREE.Scene();
@@ -192,10 +194,22 @@
     renderer.domElement.addEventListener('pointerup', onPointerUp);
 
     window.addEventListener('resize', onResize);
-    if (window.ResizeObserver) new ResizeObserver(onResize).observe(hostEl);
+    // Android reports the new size slightly after the event fires
+    window.addEventListener('orientationchange', () => setTimeout(onResize, 250));
+
+    /* Watching the host element covers every cause of a size change at once:
+       a window resize, a sidebar drag, a collapsed panel, a drawer opening.
+       The observer is held in a variable on purpose - an unreferenced
+       ResizeObserver can be collected in some engines, which silently stops
+       the preview tracking its container. */
+    if (window.ResizeObserver) {
+      hostObserver = new ResizeObserver(onResize);
+      hostObserver.observe(hostEl);
+    }
 
     wireToolbar();
     buildAxes();
+    onResize();                 // pick up the real host size once laid out
 
     S.ready = true;
     (function loop() {
@@ -205,10 +219,28 @@
     })();
   }
 
+  /* Called whenever the host box changes size: window resize, an orientation
+     change, a sidebar drag, a panel collapse, or a drawer opening.
+
+     setSize() is deliberately called WITHOUT the third argument, so it also
+     writes the canvas CSS width and height. An earlier version passed
+     `false`, which updates only the drawing buffer; because the very first
+     setSize() ran while the host was still 0px wide, the canvas kept an
+     inline `width: 0px` forever and the preview rendered into a box nobody
+     could see. Pixel ratio is applied before the size so the buffer is
+     allocated once, at the right resolution. */
   function onResize() {
     if (!renderer || !hostEl) return;
-    const w = hostEl.clientWidth, h = Math.max(hostEl.clientHeight, 1);
+    const w = hostEl.clientWidth;
+    const h = hostEl.clientHeight;
+    // a hidden or zero-sized host would make the aspect ratio NaN
+    if (w < 2 || h < 2) return;
+    if (w === lastW && h === lastH) return;
+    lastW = w; lastH = h;
+
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(w, h);
+
     const aspect = w / h;
     perspCam.aspect = aspect;
     perspCam.updateProjectionMatrix();
@@ -492,6 +524,11 @@
     clear,
     select,
     resetCamera,
+    /* Called by the layout code after the sidebar is dragged, after the
+       Controls panel is collapsed, and after an Android orientation change.
+       A CSS size change alone does not update the WebGL drawing buffer or
+       the camera aspect ratio, so this has to be explicit. */
+    resize: onResize,
     get selected() { return S.selected; },
   };
 

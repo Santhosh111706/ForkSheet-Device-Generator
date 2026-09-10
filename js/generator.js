@@ -863,31 +863,31 @@ function buildScm(G, meshPrefix, C) {
 
 (sdegeo:set-current-contact-set "source_n")
 (sdegeo:set-contact-faces
-  (list (find-face-id (position (/ (+ x0 x1) 2) y_sd1 znc_mid))) "source_n")
+  (find-face-id (position (/ (+ x0 x1) 2) y_sd1 znc_mid)) "source_n")
 
 (sdegeo:set-current-contact-set "drain_n")
 (sdegeo:set-contact-faces
-  (list (find-face-id (position (/ (+ x2 x3) 2) y_sd1 znc_mid))) "drain_n")
+  (find-face-id (position (/ (+ x2 x3) 2) y_sd1 znc_mid)) "drain_n")
 
 (sdegeo:set-current-contact-set "gate_n")
 (sdegeo:set-contact-faces
-  (list (find-face-id (position (/ (+ xg0 xg1) 2) ygt1 znc_mid))) "gate_n")
+  (find-face-id (position (/ (+ xg0 xg1) 2) ygt1 znc_mid)) "gate_n")
 
 (sdegeo:set-current-contact-set "source_p")
 (sdegeo:set-contact-faces
-  (list (find-face-id (position (/ (+ x0 x1) 2) y_sd1 zpc_mid))) "source_p")
+  (find-face-id (position (/ (+ x0 x1) 2) y_sd1 zpc_mid)) "source_p")
 
 (sdegeo:set-current-contact-set "drain_p")
 (sdegeo:set-contact-faces
-  (list (find-face-id (position (/ (+ x2 x3) 2) y_sd1 zpc_mid))) "drain_p")
+  (find-face-id (position (/ (+ x2 x3) 2) y_sd1 zpc_mid)) "drain_p")
 
 (sdegeo:set-current-contact-set "gate_p")
 (sdegeo:set-contact-faces
-  (list (find-face-id (position (/ (+ xg0 xg1) 2) ygt1 zpc_mid))) "gate_p")
+  (find-face-id (position (/ (+ xg0 xg1) 2) ygt1 zpc_mid)) "gate_p")
 
 (sdegeo:set-current-contact-set "substrate")
 (sdegeo:set-contact-faces
-  (list (find-face-id (position (/ (+ x0 x3) 2) ysub0 znc_mid))) "substrate")
+  (find-face-id (position (/ (+ x0 x3) 2) ysub0 znc_mid)) "substrate")
 
 
 ;; =====================================================================
@@ -1037,6 +1037,11 @@ function setStatus(kind, title, lines) {
   box.innerHTML = html;
 }
 
+/** Keep the sidebar Download button and its header mirror in step. */
+function setDownloadEnabled(on) {
+  $$('#btn-download, #btn-download-top').forEach((b) => { b.disabled = !on; });
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1098,7 +1103,7 @@ function refreshPreview() {
     setStatus('error', `${res.errs.length} problem(s) - nothing generated`, res.errs);
     updateSummary(null, C);
     if (window.Preview) window.Preview.clear();
-    $('#btn-download').disabled = true;
+    setDownloadEnabled(false);
     return;
   }
 
@@ -1116,7 +1121,7 @@ function refreshPreview() {
             msg.concat(res.warns));
 
   updateSummary(res, C);
-  $('#btn-download').disabled = false;
+  setDownloadEnabled(true);
 
   if (window.Preview) window.Preview.setRegions(res.R);
 }
@@ -1234,6 +1239,11 @@ function onModeChange() {
   const single = $('#gen-mode').value === 'single';
   $('#sweep-fields').style.display = single ? 'none' : '';
   $('#btn-download').textContent = single ? 'Download .scm' : 'Download all cases';
+  const top = $('#btn-download-top');
+  if (top) {
+    top.textContent = single ? 'Download' : 'Download all';
+    top.title = single ? 'Download the generated .scm' : 'Download every sweep case';
+  }
 }
 
 /* ---------------------------------------------------------------- boot */
@@ -1263,8 +1273,12 @@ function initGenerator() {
   $('#mesh-prefix-custom').addEventListener('input', schedulePreview);
   $('#gen-mode').addEventListener('change', onModeChange);
 
-  $('#btn-generate').addEventListener('click', doGenerate);
-  $('#btn-download').addEventListener('click', doDownload);
+  // The two header buttons mirror the sidebar ones, so the primary actions
+  // stay reachable when the parameters panel is closed or off-canvas.
+  $$('#btn-generate, #btn-generate-top').forEach((b) =>
+    b.addEventListener('click', doGenerate));
+  $$('#btn-download, #btn-download-top').forEach((b) =>
+    b.addEventListener('click', doDownload));
   $('#btn-reset').addEventListener('click', doReset);
   $('#btn-copy').addEventListener('click', () => {
     if (!app.lastScm) return;
@@ -1279,6 +1293,10 @@ function initGenerator() {
 
   $('#mesh-prefix-custom').disabled = true;
   onModeChange();
+
+  // layout: sidebar resizing, drawer mode, viewport watchers
+  initLayout();
+
   refreshPreview();
 }
 
@@ -1292,3 +1310,356 @@ window.Generator = {
   compute, regionList, validate, buildScm, caseName, materialColor, n,
   DEFAULT_PARAMS, DEFAULT_CONSTANTS,
 };
+
+
+/* ==========================================================================
+   8. LAYOUT
+   --------------------------------------------------------------------------
+   One layout controller for both sidebars, both drag handles and the two
+   header toggles. There is no second implementation anywhere: the CSS owns
+   the geometry, this file owns the two width variables and the open/closed
+   state.
+
+   Desktop (> 1000px)
+     Three columns. --sidebar-l and --sidebar-r are clamped so the centre
+     workspace can never be squeezed below MIN_CENTER, and both widths are
+     remembered between visits. The header toggles collapse a whole column.
+
+   Drawer mode (<= 1000px)
+     The same two panels become off-canvas drawers over a scrim. The header
+     toggles open and close them; so do the drawer close buttons, the scrim
+     and Escape. The centre column keeps the full width underneath, so the
+     3D preview is never permanently covered.
+
+   Either way, every CSS size change is followed by an explicit call into the
+   Three.js renderer, because a CSS-driven resize on its own updates neither
+   the WebGL drawing buffer nor the camera aspect ratio.
+   ========================================================================== */
+
+const MOBILE_QUERY = '(max-width: 1000px)';
+const MIN_CENTER   = 380;      // px the centre workspace must always keep
+
+const PANELS = {
+  left: {
+    id: 'controls',  resizer: 'resizer-left',  btn: 'btn-toggle-controls',
+    cssVar: '--sidebar-l', storeKey: 'fsg.sidebarL', bodyClass: 'hide-left',
+    min: 260, max: 560, def: 380, maxFraction: 0.45,
+    sign: 1,                   // dragging right widens the left panel
+  },
+  right: {
+    id: 'inspector', resizer: 'resizer-right', btn: 'btn-toggle-inspector',
+    cssVar: '--sidebar-r', storeKey: 'fsg.sidebarR', bodyClass: 'hide-right',
+    min: 200, max: 460, def: 260, maxFraction: 0.35,
+    sign: -1,                  // dragging right narrows the right panel
+  },
+};
+
+/* The width the user asked for, which is NOT the width currently applied.
+   Clamping is recomputed from this on every layout pass and never written
+   back, so narrowing the window temporarily squeezes a sidebar without
+   destroying the preference: widen the window again and it returns to the
+   width that was actually dragged. */
+const wanted = { left: PANELS.left.def, right: PANELS.right.def };
+
+/* The width in effect right now, after clamping. */
+const applied = { left: PANELS.left.def, right: PANELS.right.def };
+
+let mobileQuery = null;
+const isDrawerMode = () => !!(mobileQuery && mobileQuery.matches);
+
+const el = (id) => document.getElementById(id);
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+function readStored(key, fallback) {
+  try {
+    const v = parseFloat(localStorage.getItem(key));
+    return Number.isFinite(v) ? v : fallback;
+  } catch (_) { return fallback; }        // private mode, or storage disabled
+}
+
+function writeStored(key, value) {
+  try { localStorage.setItem(key, String(Math.round(value))); } catch (_) { /* ignore */ }
+}
+
+/* -------------------------------------------------- renderer resize hook */
+/* Batched onto an animation frame so a drag stays smooth with a large model
+   on screen, instead of reallocating the drawing buffer on every pointermove. */
+let resizeRaf = null;
+function requestPreviewResize() {
+  if (resizeRaf) return;
+  resizeRaf = requestAnimationFrame(() => {
+    resizeRaf = null;
+    if (window.Preview && window.Preview.resize) window.Preview.resize();
+  });
+}
+
+/* ------------------------------------------------------------- widths */
+
+/** Width available to the three columns, measured rather than assumed. */
+function availableWidth() {
+  const page = el('page');
+  if (!page) return window.innerWidth;
+  const cs = getComputedStyle(page);
+  let avail = page.clientWidth
+            - parseFloat(cs.paddingLeft || 0)
+            - parseFloat(cs.paddingRight || 0);
+  for (const side of ['left', 'right']) {
+    const handle = el(PANELS[side].resizer);
+    // offsetParent is null when the handle is display:none
+    if (handle && handle.offsetParent !== null) {
+      avail -= handle.getBoundingClientRect().width;
+    }
+  }
+  return Math.max(0, avail);
+}
+
+/**
+ * Clamp both sidebars against the current window and write the CSS
+ * variables. The centre column is protected first: if the two sidebars
+ * together would leave it below MIN_CENTER, the right one gives ground
+ * first, then the left, each down to its own minimum.
+ */
+function applyWidths(persist) {
+  const avail = availableWidth();
+  const hiddenL = document.body.classList.contains('hide-left')  && !isDrawerMode();
+  const hiddenR = document.body.classList.contains('hide-right') && !isDrawerMode();
+
+  const ceiling = (cfg) =>
+    Math.max(cfg.min, Math.min(cfg.max, avail * cfg.maxFraction));
+
+  let l = clamp(wanted.left,  PANELS.left.min,  ceiling(PANELS.left));
+  let r = clamp(wanted.right, PANELS.right.min, ceiling(PANELS.right));
+
+  if (!isDrawerMode()) {
+    // protect the centre workspace: the right panel gives ground first
+    let over = (hiddenL ? 0 : l) + (hiddenR ? 0 : r) + MIN_CENTER - avail;
+    if (over > 0 && !hiddenR) {
+      const give = Math.min(over, r - PANELS.right.min);
+      r -= give; over -= give;
+    }
+    if (over > 0 && !hiddenL) {
+      l -= Math.min(over, l - PANELS.left.min);
+    }
+  }
+
+  applied.left = l;
+  applied.right = r;
+
+  const root = document.documentElement.style;
+  root.setProperty('--sidebar-l', Math.round(l) + 'px');
+  root.setProperty('--sidebar-r', Math.round(r) + 'px');
+
+  if (persist) {
+    writeStored(PANELS.left.storeKey, wanted.left);
+    writeStored(PANELS.right.storeKey, wanted.right);
+  }
+  requestPreviewResize();
+}
+
+function setPanelWidth(side, px, persist) {
+  const cfg = PANELS[side];
+  wanted[side] = clamp(px, cfg.min, cfg.max);
+  applyWidths(persist);
+}
+
+/* ------------------------------------------------------------- resizers */
+function initResizer(side) {
+  const cfg = PANELS[side];
+  const handle = el(cfg.resizer);
+  const panel = el(cfg.id);
+  if (!handle || !panel) return;
+
+  let startX = 0, startW = 0, dragging = false;
+
+  const onMove = (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    setPanelWidth(side, startW + cfg.sign * (e.clientX - startX), false);
+  };
+
+  const onUp = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+    document.body.classList.remove('resizing');
+    try { handle.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+    applyWidths(true);          // persist once, at the end of the drag
+  };
+
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || isDrawerMode()) return;
+    e.preventDefault();
+    dragging = true;
+    startX = e.clientX;
+    startW = panel.getBoundingClientRect().width;
+    handle.classList.add('dragging');
+    document.body.classList.add('resizing');
+    try { handle.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  });
+
+  // keyboard accessible: arrows nudge, Home resets
+  handle.addEventListener('keydown', (e) => {
+    const step = (e.shiftKey ? 40 : 12) * cfg.sign;
+    if (e.key === 'ArrowLeft')       setPanelWidth(side, applied[side] - step, true);
+    else if (e.key === 'ArrowRight') setPanelWidth(side, applied[side] + step, true);
+    else if (e.key === 'Home')       setPanelWidth(side, cfg.def, true);
+    else return;
+    e.preventDefault();
+  });
+
+  handle.addEventListener('dblclick', () => setPanelWidth(side, cfg.def, true));
+}
+
+/* --------------------------------------------------- open / close panels */
+function syncScrim() {
+  const scrim = el('drawer-scrim');
+  if (!scrim) return;
+  const anyOpen = isDrawerMode() &&
+    ['left', 'right'].some((s) => {
+      const p = el(PANELS[s].id);
+      return p && p.classList.contains('open');
+    });
+  scrim.hidden = !anyOpen;
+}
+
+function isPanelVisible(side) {
+  const cfg = PANELS[side];
+  const panel = el(cfg.id);
+  if (!panel) return false;
+  return isDrawerMode()
+    ? panel.classList.contains('open')
+    : !document.body.classList.contains(cfg.bodyClass);
+}
+
+function setPanelVisible(side, visible) {
+  const cfg = PANELS[side];
+  const panel = el(cfg.id);
+  const btn = el(cfg.btn);
+  if (!panel) return;
+
+  if (isDrawerMode()) {
+    panel.classList.toggle('open', visible);
+    // only one drawer at a time: they would otherwise fight over the scrim
+    if (visible) {
+      const other = side === 'left' ? 'right' : 'left';
+      const op = el(PANELS[other].id);
+      if (op) op.classList.remove('open');
+      const ob = el(PANELS[other].btn);
+      if (ob) ob.setAttribute('aria-expanded', 'false');
+    }
+    syncScrim();
+  } else {
+    panel.classList.remove('open');
+    document.body.classList.toggle(cfg.bodyClass, !visible);
+    syncScrim();
+    applyWidths(false);
+  }
+
+  if (btn) btn.setAttribute('aria-expanded', String(visible));
+  requestPreviewResize();
+}
+
+function closeDrawers() {
+  if (!isDrawerMode()) return;
+  for (const side of ['left', 'right']) setPanelVisible(side, false);
+}
+
+function initPanelToggles() {
+  for (const side of ['left', 'right']) {
+    const btn = el(PANELS[side].btn);
+    if (btn) {
+      btn.addEventListener('click', () => setPanelVisible(side, !isPanelVisible(side)));
+    }
+  }
+
+  document.querySelectorAll('.drawer-close').forEach((b) => {
+    b.addEventListener('click', () => {
+      const side = b.dataset.close === 'inspector' ? 'right' : 'left';
+      setPanelVisible(side, false);
+    });
+  });
+
+  const scrim = el('drawer-scrim');
+  if (scrim) scrim.addEventListener('click', closeDrawers);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDrawers();
+  });
+}
+
+/* ------------------------------------------------ mode / viewport watchers */
+
+/** Reset panel state whenever the layout crosses the drawer breakpoint. */
+function onModeSwitch() {
+  const drawer = isDrawerMode();
+  for (const side of ['left', 'right']) {
+    const cfg = PANELS[side];
+    const panel = el(cfg.id);
+    const btn = el(cfg.btn);
+    if (panel) panel.classList.remove('open');
+    if (drawer) {
+      // drawers start closed so the preview owns the screen on arrival
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    } else if (btn) {
+      btn.setAttribute('aria-expanded',
+        String(!document.body.classList.contains(cfg.bodyClass)));
+    }
+  }
+  syncScrim();
+  applyWidths(false);
+}
+
+/** Publish the real header height so the drawers can sit exactly below it. */
+function trackHeaderHeight() {
+  const bar = el('titlebar');
+  if (!bar) return;
+  const push = () => document.documentElement.style
+    .setProperty('--header-h', Math.round(bar.getBoundingClientRect().height) + 'px');
+  push();
+  if (window.ResizeObserver) new ResizeObserver(push).observe(bar);
+  else window.addEventListener('resize', push);
+}
+
+function initViewportWatchers() {
+  window.addEventListener('resize', () => applyWidths(false));
+  window.addEventListener('orientationchange', () => setTimeout(() => {
+    applyWidths(false);
+    requestPreviewResize();
+  }, 250));
+  // the Android URL bar sliding away changes the usable height without
+  // always firing a window resize event
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', requestPreviewResize);
+  }
+
+  /* A hidden page runs no animation frames, so resize work queued while the
+     tab was in the background has to be re-driven when it comes back. */
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) { applyWidths(false); requestPreviewResize(); }
+  });
+}
+
+/* ------------------------------------------------------------- boot */
+function initLayout() {
+  mobileQuery = window.matchMedia(MOBILE_QUERY);
+  if (mobileQuery.addEventListener) mobileQuery.addEventListener('change', onModeSwitch);
+  else mobileQuery.addListener(onModeSwitch);           // older Safari
+
+  wanted.left  = clamp(readStored(PANELS.left.storeKey,  PANELS.left.def),
+                       PANELS.left.min,  PANELS.left.max);
+  wanted.right = clamp(readStored(PANELS.right.storeKey, PANELS.right.def),
+                       PANELS.right.min, PANELS.right.max);
+
+  trackHeaderHeight();
+  initResizer('left');
+  initResizer('right');
+  initPanelToggles();
+  initViewportWatchers();
+  onModeSwitch();
+}

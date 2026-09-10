@@ -43,7 +43,27 @@ Everything runs in the browser.
 - Perspective and orthographic projection
 - Surface and wireframe modes, opacity slider, edge toggle
 - XYZ axes indicator
-- Resizes correctly with the browser window
+- Resizes correctly with the browser window, with the sidebars, and after an
+  Android orientation change
+
+**Interface layout**
+
+- Three-column workspace: parameters on the left, preview and generated SCM in
+  the centre, region inspector on the right
+- Both sidebars are independently resizable by dragging the handle beside them.
+  Arrow keys nudge a focused handle, `Home` or a double click restores the
+  default width, and the widths are remembered between visits
+- Both sidebars scroll on their own; the centre column keeps whatever width is
+  left and is never allowed below 380 px
+- Either sidebar can be collapsed entirely from the header, which hands its
+  width to the 3D preview
+- Below 1000 px the sidebars become off-canvas drawers over a scrim, opened
+  from the header and closed by the header button, the drawer's close button,
+  the scrim or `Escape`. The preview keeps the full width underneath
+- Generate and Download are mirrored in the header, so the primary actions stay
+  reachable while the parameters panel is closed
+- Verified at 1920x1080, 1600x900, 1440x900, 1366x768, 1280x720, 1002x700,
+  and on Android portrait (412x915, 360x640) and landscape (915x412)
 
 ---
 
