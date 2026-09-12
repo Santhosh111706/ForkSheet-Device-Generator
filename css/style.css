@@ -365,6 +365,24 @@ body.resizing iframe { pointer-events: none; }
   font-family: var(--mono);
 }
 
+/* a checkbox that acts as the field's own control, not a sub-option */
+.chk-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-bottom: 0;
+}
+.chk-field input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  cursor: pointer;
+}
+
 .field.compact { margin-bottom: 10px; }
 .field.compact label { font-size: 11px; }
 

@@ -5,9 +5,14 @@
 A **static, browser-only** parametric generator for 3D Forksheet CMOS
 Sentaurus SDE geometry, with a live interactive 3D preview.
 
-It is a direct port of the Python generator `gen_forksheet.py`. The generated
-`.scm` files are **byte-identical** to the Python output for the same inputs,
-and are compatible with the SCM Device Viewer project.
+It is a direct port of the Python generator `gen_forksheet.py` and emits the
+**V8 baseline** structure. The generated `.scm` files are compatible with the
+SCM Device Viewer project.
+
+By default the output is **code only**: every Scheme comment is stripped, which
+roughly halves the file (282 lines instead of 482). Tick **Include comments in
+the SCM** under Generation options to emit the fully annotated V8 text instead,
+which is byte-identical to the Python output for the same inputs.
 
 No Python, no Flask, no backend, no Node.js, no npm and no build step.
 Everything runs in the browser.
@@ -31,6 +36,7 @@ Everything runs in the browser.
 - Three generation modes: single case, sweep one parameter at a time,
   and full grid, matching the Python `SWEEP_MODE` options
 - Mesh prefix `auto` or a fixed custom name
+- Comment-free output by default, or the fully annotated V8 text on request
 - Download the `.scm`, or copy it to the clipboard
 
 **Live 3D preview**
@@ -141,12 +147,18 @@ without change in behaviour:
 | `region_list(g)` | `regionList(g, C)` |
 | `validate(...)` | `validate(...)` |
 | `build_scm(g, mesh_prefix)` | `buildScm(G, meshPrefix, C)` |
+| (n/a - comment stripping is browser-only) | `stripScmComments()`, `emitScm()` |
 | `case_name(...)` | `caseName(...)` |
 | `n(v)` number formatter | `n(v)` |
 | `SWEEP_MODE` one_at_a_time / full_grid | Mode dropdown |
 
 The SCM template was converted mechanically from the Python f-string rather
-than retyped, and the output was then diffed against the Python generator:
+than retyped, and the output was then diffed against the Python generator.
+`buildScm()` is still that verbatim emitter; comment stripping is a separate
+pass in `stripScmComments()` applied afterwards by `emitScm()`, so the
+annotated text remains available unchanged. With comments enabled the only
+difference from the figures below is the `V7 baseline` header line, which now
+reads `V8 baseline`:
 
 ```
 IDENTICAL  fork_TNS_0.004_WNS_0.022_TFORK_0.007.scm  (23026 bytes)

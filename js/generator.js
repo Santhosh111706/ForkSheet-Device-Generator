@@ -1,7 +1,7 @@
 /* ==========================================================================
    js/generator.js
    --------------------------------------------------------------------------
-   Browser port of gen_forksheet.py, the parametric generator for the V7
+   Browser port of gen_forksheet.py, the parametric generator for the V8
    3D Forksheet CMOS Sentaurus SDE structure.
 
    Everything runs client side. There is no Python, no Flask, no Node and no
@@ -476,7 +476,7 @@ function n(v) {
 
 function buildScm(G, meshPrefix, C) {
   return `;; =====================================================================
-;;  3D FORKSHEET CMOS  --  generated from the V7 baseline
+;;  3D FORKSHEET CMOS  --  generated from the V8 baseline
 ;;  NMOS  |  Si3N4 fork wall  |  PMOS
 ;;  Sentaurus Structure Editor W-2024.09-SP1.  Units: micrometers.
 ;;
@@ -961,6 +961,79 @@ function buildScm(G, meshPrefix, C) {
 
 
 /* ==========================================================================
+   5b. COMMENT STRIPPING
+   --------------------------------------------------------------------------
+   buildScm() above is left exactly as the Python generator writes it, banner
+   comments and all. Stripping happens here instead, as a separate pass, so
+   the fully annotated V8 text stays available and the emitter itself never
+   has to know about the option.
+   ========================================================================== */
+
+/**
+ * Remove Scheme comments from SCM text.
+ *
+ * This walks each line character by character rather than using a regex,
+ * because a `;` inside a string literal is data, not a comment. The custom
+ * mesh prefix is user-supplied and lands inside a quoted string, so a naive
+ * /;.*$/ would happily truncate `(sde:build-mesh "snmesh" "" "a;b")` into
+ * broken Scheme.
+ *
+ * Whole-line comments disappear entirely; trailing comments are cut off and
+ * the remaining code keeps its indentation. Runs of blank lines left behind
+ * by the removed banner blocks collapse to a single blank line, so the
+ * result reads as grouped sections rather than scattered code.
+ */
+function stripScmComments(text) {
+  const lines = [];
+
+  for (const raw of String(text).split('\n')) {
+    let inString = false;
+    let cut = -1;
+
+    for (let i = 0; i < raw.length; i++) {
+      const ch = raw[i];
+      if (inString) {
+        if (ch === '\\') { i++; continue; }   // escaped char, skip it
+        if (ch === '"') inString = false;
+      } else if (ch === '"') {
+        inString = true;
+      } else if (ch === ';') {
+        cut = i;
+        break;
+      }
+    }
+
+    const code = (cut >= 0 ? raw.slice(0, cut) : raw).replace(/[ \t]+$/, '');
+    lines.push(code);
+  }
+
+  // collapse blank runs, drop leading blanks, end with exactly one newline
+  const out = [];
+  for (const line of lines) {
+    if (line === '' && (out.length === 0 || out[out.length - 1] === '')) continue;
+    out.push(line);
+  }
+  while (out.length && out[out.length - 1] === '') out.pop();
+  return out.join('\n') + '\n';
+}
+
+/** True when the generated SCM should keep its comments. */
+function wantComments() {
+  const el = document.getElementById('chk-scm-comments');
+  return !!(el && el.checked);
+}
+
+/**
+ * The single place the rest of the UI asks for SCM text. buildScm() stays the
+ * byte-for-byte V8 emitter; this applies the comment preference on top.
+ */
+function emitScm(g, meshPrefix, C) {
+  const scm = buildScm(g, meshPrefix, C);
+  return wantComments() ? scm : stripScmComments(scm);
+}
+
+
+/* ==========================================================================
    6. FILE NAMING AND DOWNLOAD
    ========================================================================== */
 
@@ -1108,7 +1181,7 @@ function refreshPreview() {
   }
 
   const stem = caseName(p.T_NS, p.W_NS, p.T_FORK);
-  app.lastScm = buildScm(res.g, meshPrefixFor(stem), C);
+  app.lastScm = emitScm(res.g, meshPrefixFor(stem), C);
   app.lastName = stem + '.scm';
 
   const msg = [
@@ -1194,7 +1267,7 @@ function doSweep() {
       rejected.push(`${stem}: ${res.errs[0]}`);
       continue;
     }
-    files.push([stem + '.scm', buildScm(res.g, meshPrefixFor(stem), C)]);
+    files.push([stem + '.scm', emitScm(res.g, meshPrefixFor(stem), C)]);
     written.push(stem);
   }
 
@@ -1228,6 +1301,7 @@ function doReset() {
   $('#gen-mode').value = 'single';
   $('#mesh-prefix-mode').value = 'auto';
   $('#mesh-prefix-custom').value = 'fork1108';
+  $('#chk-scm-comments').checked = false;
   $('#scm-preview').textContent = '';
   $('#scm-lines').textContent = '';
   onModeChange();
@@ -1271,6 +1345,11 @@ function initGenerator() {
     schedulePreview();
   });
   $('#mesh-prefix-custom').addEventListener('input', schedulePreview);
+  $('#chk-scm-comments').addEventListener('change', () => {
+    refreshPreview();
+    // the SCM panel is already on screen; keep it in step with the toggle
+    if ($('#scm-preview').textContent) doGenerate();
+  });
   $('#gen-mode').addEventListener('change', onModeChange);
 
   // The two header buttons mirror the sidebar ones, so the primary actions
@@ -1307,7 +1386,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /* expose for preview.js and for console debugging */
 window.Generator = {
-  compute, regionList, validate, buildScm, caseName, materialColor, n,
+  compute, regionList, validate, buildScm, emitScm, stripScmComments,
+  caseName, materialColor, n,
   DEFAULT_PARAMS, DEFAULT_CONSTANTS,
 };
 
