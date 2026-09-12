@@ -1,6 +1,6 @@
-**Pages Link:** https://santhosh111706.github.io/ForkSheet-Device-Generator/
-
 # Forksheet CMOS SCM Generator
+
+**Live app:** <https://santhosh111706.github.io/ForkSheet-Device-Generator/>
 
 A **static, browser-only** parametric generator for 3D Forksheet CMOS
 Sentaurus SDE geometry, with a live interactive 3D preview.
@@ -12,7 +12,7 @@ SCM Device Viewer project.
 By default the output is **code only**: every Scheme comment is stripped, which
 roughly halves the file (282 lines instead of 482). Tick **Include comments in
 the SCM** under Generation options to emit the fully annotated V8 text instead,
-which is byte-identical to the Python output for the same inputs.
+banner blocks and all. Both modes contain exactly the same Scheme.
 
 No Python, no Flask, no backend, no Node.js, no npm and no build step.
 Everything runs in the browser.
@@ -80,11 +80,11 @@ Everything runs in the browser.
 ```
 project/
 ├── index.html          all generator controls, preview, SCM output
-├── README.md
+├── Readme.md
 ├── css/
 │   └── style.css       dark engineering / TCAD interface
 └── js/
-    ├── generator.js    port of gen_forksheet.py: compute, validate, buildScm
+    ├── generator.js    compute, validate, buildScm, emitScm, layout
     └── preview.js      Three.js scene, picking, cameras
 ```
 
@@ -129,7 +129,9 @@ sub-path alike.
 5. For a sweep, change **Mode**, enter comma-separated value lists, and press
    **Download all cases**. Files download one after another with a short gap,
    since browsers throttle rapid successive downloads.
-6. Press **Reset** to restore every default.
+6. Tick **Include comments in the SCM** if you want the annotated V8 text
+   rather than the default code-only output.
+7. Press **Reset** to restore every default.
 
 In the preview: left-drag rotates, right-drag pans, scroll zooms, and clicking
 a region selects it and fills the inspector.
@@ -153,26 +155,29 @@ without change in behaviour:
 | `SWEEP_MODE` one_at_a_time / full_grid | Mode dropdown |
 
 The SCM template was converted mechanically from the Python f-string rather
-than retyped, and the output was then diffed against the Python generator.
-`buildScm()` is still that verbatim emitter; comment stripping is a separate
-pass in `stripScmComments()` applied afterwards by `emitScm()`, so the
-annotated text remains available unchanged. With comments enabled the only
-difference from the figures below is the `V7 baseline` header line, which now
-reads `V8 baseline`:
+than retyped; the original port was diffed byte for byte against the Python
+output. `buildScm()` is still that verbatim emitter. Comment stripping is a
+separate pass in `stripScmComments()`, applied afterwards by `emitScm()`, so
+the annotated text is never altered - only optionally reduced.
 
-```
-IDENTICAL  fork_TNS_0.004_WNS_0.022_TFORK_0.007.scm  (23026 bytes)
-IDENTICAL  fork_TNS_0.004_WNS_0.030_TFORK_0.008.scm  (22966 bytes)
-IDENTICAL  fork_TNS_0.005_WNS_0.020_TFORK_0.006.scm  (22964 bytes)
-IDENTICAL  fork_TNS_0.006_WNS_0.015_TFORK_0.010.scm  (22980 bytes)
-IDENTICAL  fork_TNS_0.006_WNS_0.030_TFORK_0.008.scm  (22967 bytes)
-IDENTICAL  fork_TNS_0.008_WNS_0.025_TFORK_0.012.scm  (22984 bytes)
-6 identical, 0 differing
-```
+Current output, measured across the six reference cases. Every case produces
+88 regions, 5 materials and 7 contacts:
 
-Validation was checked to return the same error and warning counts as the
-Python version across eight cases, valid and invalid. Sweep case counts match
-too: 8 for one-at-a-time, 27 for the full grid.
+| case | code only | with comments |
+|---|---|---|
+| `fork_TNS_0.004_WNS_0.022_TFORK_0.007` | 282 lines, 11563 B | 482 lines, 22926 B |
+| `fork_TNS_0.004_WNS_0.030_TFORK_0.008` | 282 lines, 11557 B | 482 lines, 22917 B |
+| `fork_TNS_0.005_WNS_0.020_TFORK_0.006` | 282 lines, 11558 B | 482 lines, 22915 B |
+| `fork_TNS_0.006_WNS_0.015_TFORK_0.010` | 282 lines, 11560 B | 482 lines, 22931 B |
+| `fork_TNS_0.006_WNS_0.030_TFORK_0.008` | 282 lines, 11556 B | 482 lines, 22918 B |
+| `fork_TNS_0.008_WNS_0.025_TFORK_0.012` | 282 lines, 11563 B | 482 lines, 22935 B |
+
+The two columns contain the same Scheme: stripping only removes comment text,
+which was checked by re-deriving the code from both and comparing. Parentheses
+stay balanced and no `;` survives in the code-only output, including when a
+custom mesh prefix itself contains one.
+
+Sweep case counts: 8 for one-at-a-time, 27 for the full grid.
 
 Output from this generator was loaded into the SCM Device Viewer and passed
 all eleven geometry checks: 88 regions, 5 materials, 7 contacts, no overlaps,
