@@ -50,10 +50,16 @@
 
     <!-- Quick actions mirror the sidebar buttons, so the two primary generator
          actions stay reachable when the panels are closed on a small screen. -->
+    <button id="btn-open-top" class="btn small" type="button"
+            title="Open an .scm file or any file of Sentaurus SDE commands">Open</button>
     <button id="btn-generate-top" class="btn small primary" type="button"
             title="Generate the SCM text">Generate</button>
     <button id="btn-download-top" class="btn small" type="button" disabled
             title="Download the generated .scm">Download</button>
+
+    <!-- one file input, shared by the header button and the Import card -->
+    <input id="file-input" type="file" hidden
+           accept=".scm,.txt,.cmd,.scheme,.ss,text/plain">
 
     <button id="btn-toggle-inspector" class="icon-btn" type="button"
             aria-expanded="true" aria-controls="inspector"
@@ -76,6 +82,36 @@
       <span>Parameters</span>
       <button class="drawer-close" type="button" data-close="controls"
               aria-label="Close the parameters panel">&times;</button>
+    </div>
+
+    <!-- ---------- import ---------- -->
+    <div class="card collapsed" id="import-card">
+      <div class="section-head"><h2>Import SDE / SCM</h2><span class="chev"></span></div>
+      <div class="section-body">
+        <p class="note">
+          Open an <code>.scm</code> file or paste Sentaurus SDE commands. The
+          input is recognised by its content, not its file name, so a pasted
+          fragment and a saved file are handled the same way.
+        </p>
+
+        <div class="actions">
+          <button id="btn-choose-file" class="btn" type="button">Choose file&hellip;</button>
+          <button id="btn-load-paste" class="btn primary" type="button">Load pasted text</button>
+        </div>
+
+        <div class="field" style="margin-top:12px">
+          <label for="paste-input">Paste SDE commands</label>
+          <div class="ctl">
+            <textarea id="paste-input" rows="6" spellcheck="false"
+                      placeholder="(sde:clear)&#10;(define w 0.05)&#10;(sdegeo:create-cuboid (position 0 0 0) (position w 0.02 0.01) &quot;Silicon&quot; &quot;Body&quot;)"></textarea>
+          </div>
+        </div>
+
+        <div id="import-status" class="import-status">Nothing imported.</div>
+
+        <button id="btn-clear-import" class="btn ghost" type="button" disabled
+                style="margin-top:10px;width:100%">Clear import</button>
+      </div>
     </div>
 
     <!-- ---------- study parameters ---------- -->
@@ -168,11 +204,15 @@
         </div>
 
         <div class="field">
-          <label class="chk-field">
-            <input type="checkbox" id="chk-scm-comments">
-            <span>Include comments in the SCM</span>
-          </label>
-          <small>Off by default: the generated file contains only Scheme code. Turn on to emit the annotated V8 text with its banner and inline comments.</small>
+          <label for="scm-format">Output format</label>
+          <div class="ctl">
+            <select id="scm-format">
+              <option value="flat">Step-by-step commands</option>
+              <option value="structured">Structured &mdash; helper procedures</option>
+              <option value="annotated">Structured with comments</option>
+            </select>
+          </div>
+          <small>Step-by-step writes every command out one by one with no comments, the way you would type it into a script window. The structured forms keep the V8 helper procedures.</small>
         </div>
       </div>
     </div>
@@ -279,6 +319,14 @@
 
     <!-- ------------------ live 3D preview ------------------ -->
     <section id="preview-section">
+      <!-- shown only while imported geometry, not the parametric model,
+           is what the preview is displaying -->
+      <div id="import-banner" hidden>
+        <span>Showing <strong id="import-banner-what">imported geometry</strong> &mdash; the parametric controls are not driving this view.</span>
+        <span class="spacer"></span>
+        <button id="btn-exit-import" class="btn tiny" type="button">Return to generator</button>
+      </div>
+
       <div class="preview-head">
         <h2 class="preview-title">Live preview</h2>
         <div class="preview-tools">
@@ -332,14 +380,22 @@
       </div>
     </section>
 
-    <!-- ------------------ generated SCM text ------------------ -->
+    <!-- ------------------ script view ------------------ -->
     <section id="scm-section" class="card">
       <div class="section-head">
-        <h2>Generated SCM <span id="scm-lines" class="dim"></span></h2>
+        <h2>Script <span id="scm-lines" class="dim"></span></h2>
+        <div class="script-tools">
+          <button id="btn-script-copy" class="btn tiny" type="button"
+                  title="Copy the whole script to the clipboard">Copy</button>
+          <button id="btn-script-download" class="btn tiny" type="button" disabled
+                  title="Save the script as an .scm file">Download</button>
+          <button id="btn-script-expand" class="btn tiny" type="button"
+                  aria-pressed="false" title="Expand the script over the preview">Expand</button>
+        </div>
         <span class="chev"></span>
       </div>
       <div class="section-body">
-        <pre id="scm-preview"></pre>
+        <pre id="scm-preview" tabindex="0"></pre>
       </div>
     </section>
 
@@ -395,6 +451,7 @@
 </footer>
 
 <script src="js/preview.js"></script>
+<script src="js/sde-parser.js"></script>
 <script src="js/generator.js"></script>
 </body>
 </html>

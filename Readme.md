@@ -9,10 +9,14 @@ It is a direct port of the Python generator `gen_forksheet.py` and emits the
 **V8 baseline** structure. The generated `.scm` files are compatible with the
 SCM Device Viewer project.
 
-By default the output is **code only**: every Scheme comment is stripped, which
-roughly halves the file (282 lines instead of 482). Tick **Include comments in
-the SCM** under Generation options to emit the fully annotated V8 text instead,
-banner blocks and all. Both modes contain exactly the same Scheme.
+Output is a **step-by-step script** by default: every command written out one
+by one, no comments, in the order a device is built - parameters, geometry,
+doping, contacts, mesh, build. Two structured formats are also available under
+Generation options. All three describe the same device.
+
+It also **reads** SDE: open an `.scm` file, paste commands, or drag a file onto
+the page. The input is recognised by its content, so a saved file and a pasted
+fragment take the same path.
 
 No Python, no Flask, no backend, no Node.js, no npm and no build step.
 Everything runs in the browser.
@@ -36,8 +40,29 @@ Everything runs in the browser.
 - Three generation modes: single case, sweep one parameter at a time,
   and full grid, matching the Python `SWEEP_MODE` options
 - Mesh prefix `auto` or a fixed custom name
-- Comment-free output by default, or the fully annotated V8 text on request
+- Three output formats: step-by-step commands (default), the V8 helper
+  procedures, or those procedures with their comments
 - Download the `.scm`, or copy it to the clipboard
+
+**Input**
+
+- Open an `.scm` file, paste SDE text, or drop a file anywhere on the page
+- The format is detected from the content, not the file extension, so a
+  `.txt` holding SDE commands is read correctly
+- Input that binds `T_NS`, `W_NS` and the fork wall is loaded into the
+  controls and drives the parametric model, sweeps and validation included
+- Any other SDE text is shown as geometry: the regions go to the 3D preview
+  and the script panel gets the same commands written back out cleanly
+- Procedure definitions are expanded, so a script whose geometry is built by
+  a helper called once per transistor is read correctly
+
+**Script view**
+
+- The generated commands, numbered line by line
+- Line numbers come from a CSS counter, so selecting the text copies the
+  commands without the gutter
+- Copy, Download and Expand; expanding hands the whole centre column to the
+  script
 
 **Live 3D preview**
 
@@ -84,7 +109,8 @@ project/
 ├── css/
 │   └── style.css       dark engineering / TCAD interface
 └── js/
-    ├── generator.js    compute, validate, buildScm, emitScm, layout
+    ├── generator.js    compute, validate, buildScm, buildFlatScm, import, layout
+    ├── sde-parser.js   reader and evaluator for SDE text; window.SDE
     └── preview.js      Three.js scene, picking, cameras
 ```
 
@@ -129,9 +155,12 @@ sub-path alike.
 5. For a sweep, change **Mode**, enter comma-separated value lists, and press
    **Download all cases**. Files download one after another with a short gap,
    since browsers throttle rapid successive downloads.
-6. Tick **Include comments in the SCM** if you want the annotated V8 text
-   rather than the default code-only output.
+6. Change **Output format** if you want one of the structured forms rather
+   than the default step-by-step script.
 7. Press **Reset** to restore every default.
+
+To read an existing script instead, open the **Import SDE / SCM** panel,
+press **Open** in the header, or drag a file onto the page.
 
 In the preview: left-drag rotates, right-drag pans, scroll zooms, and clicking
 a region selects it and fills the inspector.
@@ -149,7 +178,9 @@ without change in behaviour:
 | `region_list(g)` | `regionList(g, C)` |
 | `validate(...)` | `validate(...)` |
 | `build_scm(g, mesh_prefix)` | `buildScm(G, meshPrefix, C)` |
-| (n/a - comment stripping is browser-only) | `stripScmComments()`, `emitScm()` |
+| (n/a - browser-only) | `buildFlatScm()` step-by-step emitter |
+| (n/a - browser-only) | `stripScmComments()`, `emitScm()` |
+| (n/a - browser-only) | `window.SDE.parse()` / `.detect()` / `.format()` |
 | `case_name(...)` | `caseName(...)` |
 | `n(v)` number formatter | `n(v)` |
 | `SWEEP_MODE` one_at_a_time / full_grid | Mode dropdown |
@@ -161,21 +192,29 @@ separate pass in `stripScmComments()`, applied afterwards by `emitScm()`, so
 the annotated text is never altered - only optionally reduced.
 
 Current output, measured across the six reference cases. Every case produces
-88 regions, 5 materials and 7 contacts:
+88 regions, 5 materials, 7 contacts, 25 doping placements and 23 refinements
+in every format:
 
-| case | code only | with comments |
-|---|---|---|
-| `fork_TNS_0.004_WNS_0.022_TFORK_0.007` | 282 lines, 11563 B | 482 lines, 22926 B |
-| `fork_TNS_0.004_WNS_0.030_TFORK_0.008` | 282 lines, 11557 B | 482 lines, 22917 B |
-| `fork_TNS_0.005_WNS_0.020_TFORK_0.006` | 282 lines, 11558 B | 482 lines, 22915 B |
-| `fork_TNS_0.006_WNS_0.015_TFORK_0.010` | 282 lines, 11560 B | 482 lines, 22931 B |
-| `fork_TNS_0.006_WNS_0.030_TFORK_0.008` | 282 lines, 11556 B | 482 lines, 22918 B |
-| `fork_TNS_0.008_WNS_0.025_TFORK_0.012` | 282 lines, 11563 B | 482 lines, 22935 B |
+| case | step-by-step | structured | annotated |
+|---|---|---|---|
+| `fork_TNS_0.004_WNS_0.022_TFORK_0.007` | 259 lines, 16102 B | 282 lines, 11563 B | 482 lines, 22926 B |
+| `fork_TNS_0.004_WNS_0.030_TFORK_0.008` | 259 lines, 16096 B | 282 lines, 11557 B | 482 lines, 22917 B |
+| `fork_TNS_0.005_WNS_0.020_TFORK_0.006` | 259 lines, 16095 B | 282 lines, 11558 B | 482 lines, 22915 B |
+| `fork_TNS_0.006_WNS_0.015_TFORK_0.010` | 259 lines, 16101 B | 282 lines, 11560 B | 482 lines, 22931 B |
+| `fork_TNS_0.006_WNS_0.030_TFORK_0.008` | 259 lines, 16095 B | 282 lines, 11556 B | 482 lines, 22918 B |
+| `fork_TNS_0.008_WNS_0.025_TFORK_0.012` | 259 lines, 16104 B | 282 lines, 11563 B | 482 lines, 22935 B |
 
-The two columns contain the same Scheme: stripping only removes comment text,
-which was checked by re-deriving the code from both and comparing. Parentheses
-stay balanced and no `;` survives in the code-only output, including when a
-custom mesh prefix itself contains one.
+The step-by-step script is longer in bytes than the structured one because
+each cuboid is written out instead of being produced by a procedure called
+twice; it is the same 88 regions either way.
+
+Equivalence is not asserted, it is checked. The test parses the step-by-step
+output and the annotated output with `window.SDE` and compares the resulting
+region lists - name, material and all six bounds - plus the doping
+placements, contacts, refinements and mesh prefix. It also compares the
+step-by-step regions against `regionList()` directly. Parentheses stay
+balanced, every line is a complete command, and no `;` survives in the
+comment-free formats, including when a custom mesh prefix contains one.
 
 Sweep case counts: 8 for one-at-a-time, 27 for the full grid.
 
