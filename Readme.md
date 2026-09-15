@@ -57,9 +57,20 @@ Everything runs in the browser.
   regions it was measured from
 - Architecture is inferred from geometry, not from names or the file
   extension, so it works on files this app did not generate
-- A consistency check runs before every generation and reports overlaps,
-  empty gaps, disconnected regions, invalid contacts and degenerate boxes.
-  Errors block the download; nothing inconsistent can be saved
+- A consistency check runs before every generation. Errors block the
+  download; nothing inconsistent can be saved
+- **Overlaps are not errors.** SDE resolves intersecting bodies by the
+  current boolean rule, and a later `create-cuboid` replacing part of an
+  earlier one is a normal way to build a structure. Overlaps are reported
+  as information. What IS an error is the consequence: a region so
+  completely replaced by later ones that it does not survive into the final
+  structure, because any doping or contact attached to it is attached to
+  something that is no longer there
+- Also checked: empty gaps, disconnected regions, invalid contacts,
+  degenerate boxes, doping placed on regions or profiles that do not exist,
+  semiconductor regions with no doping at all, gate metal meeting
+  semiconductor with no dielectric between, and regions an identified
+  architecture requires but does not have
 - An alignment group reports the relationships rather than bare numbers:
   source-to-gate and drain-to-gate distances, source/drain symmetry,
   channel-to-gate and channel-to-source/drain continuity, spacer-to-gate
@@ -124,6 +135,23 @@ Everything runs in the browser.
   outlines the regions it refers to, so "these two overlap" becomes
   something you can look at
 - **Validation badge** over the canvas, always showing the current verdict
+
+**Doping visualization**
+
+- A Colour control switches the 3D view between three modes: material,
+  doping concentration, and material + doping combined, where doped
+  regions take their doping colour and everything else keeps its material
+- n-type is blue and p-type red, darkening with concentration, so N+, N,
+  N-, P+, P and P- are all distinguishable at a glance
+- The legend follows the mode and lists only the classes actually present,
+  each with its concentration range and region count
+- Selecting a region reports its doping type, net concentration and the
+  profiles placed on it
+- Every colour comes from the profiles in the loaded file. A region with no
+  placement is reported as undoped rather than given a plausible default
+- A region carrying more than one profile is resolved by net doping -
+  donors minus acceptors - so a counter-doped region is typed correctly
+  rather than taking whichever profile happened to be listed last
 - Resizes correctly with the browser window, with the sidebars, and after an
   Android orientation change
 
@@ -293,6 +321,11 @@ and the contact that lands on nothing.
 
 Two notes on scope, because the honest answer is more useful than a
 plausible-looking number:
+
+**EOT is derived, not stored.** Equivalent oxide thickness needs the
+permittivity of the dielectric, which SDE does not record. The analyser
+computes it from the measured physical thickness and names the constant it
+used, so the figure can be rescaled for a different k.
 
 **Work function is not in a `.scm`.** A contact set stores a name, a colour
 and a display line width - the numeric argument to

@@ -677,6 +677,15 @@ input[type="checkbox"] { accent-color: var(--accent); }
   flex: 0 0 auto;
 }
 .lname  { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+/* the doping legend carries a concentration range under each label */
+.legend-doping .lname { display: flex; flex-direction: column; gap: 1px; }
+.legend-doping .lname small {
+  font-family: var(--sans);
+  font-size: 10px;
+  color: var(--fg-dim);
+  letter-spacing: .2px;
+}
+.legend-doping .swatch { width: 15px; height: 15px; }
 .lcount { flex: 0 0 auto; color: var(--fg-dim); font-size: 11px; }
 
 /* close button, drawer mode only */

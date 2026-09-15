@@ -35,6 +35,8 @@
     showEdges: true,
     showAxes: true,
     showContacts: true,
+    colorMode: 'material',        // material | doping | combined
+    doping: null,                 // region name -> doping description
     ready: false,
     clip: { axis: null, t: 1, flip: false },
     measure: { on: false, a: null, b: null },
@@ -304,6 +306,43 @@
     if (hint) hint.style.display = '';
   }
 
+  /**
+   * The colour a region is drawn in, for the current view mode.
+   *
+   *   material  the material palette, as always
+   *   doping    the doping class colour; anything with no profile placed
+   *             is drawn grey rather than being given a plausible colour
+   *   combined  doping where a region is doped, material where it is not,
+   *             so the doped silicon reads against the dielectric and metal
+   */
+  function colorFor(region) {
+    if (S.colorMode === 'material' || !S.doping) return region.color;
+    const d = S.doping.get ? S.doping.get(region.name) : S.doping[region.name];
+    if (d && d.color) return d.color;
+    return S.colorMode === 'doping' ? '#5a636e' : region.color;
+  }
+
+  /** Swap every region to the colour its current mode calls for. */
+  function applyColors() {
+    for (const m of meshes) {
+      m.material.color.set(colorFor(m.userData.region));
+      m.material.needsUpdate = true;
+    }
+    renderLegend(S.regions);
+  }
+
+  function setColorMode(mode) {
+    S.colorMode = mode || 'material';
+    if (!S.ready) return;
+    applyColors();
+  }
+
+  function setDoping(map) {
+    S.doping = map || null;
+    if (!S.ready) return;
+    applyColors();
+  }
+
   /** Replace the scene contents with a new region list. */
   function setRegions(regions) {
     if (!S.ready) return;
@@ -328,7 +367,7 @@
 
     for (const r of S.regions) {
       const mat = new THREE.MeshLambertMaterial({
-        color: new THREE.Color(r.color),
+        color: new THREE.Color(colorFor(r)),
         transparent: true,
         opacity: S.opacity,
         wireframe: S.style === 'wireframe',
@@ -455,18 +494,82 @@
       if (el) el.textContent = v;
     };
     const fields = ['name', 'material', 'x0', 'x1', 'y0', 'y1', 'z0', 'z1',
-                    'lx', 'ly', 'lz', 'volume'];
+                    'lx', 'ly', 'lz', 'volume',
+                    'dop-type', 'dop-conc', 'dop-profile'];
     if (!r) { fields.forEach((f) => set(f, '-')); return; }
     set('name', r.name);
     set('material', r.material);
+
+    const d = S.doping && (S.doping.get ? S.doping.get(r.name) : S.doping[r.name]);
+    if (d) {
+      set('dop-type', `${d.label} (${d.netType === 'n' ? 'n-type' : 'p-type'})` +
+                      (d.counterDoped ? ' counter-doped' : ''));
+      set('dop-conc', d.netConc.toExponential(2) + ' cm-3');
+      set('dop-profile', d.placements.map((x) =>
+        `${x.profile}: ${x.species} ${Number(x.conc).toExponential(1)}`).join('; '));
+    } else {
+      set('dop-type', 'undoped');
+      set('dop-conc', '-');
+      set('dop-profile', 'no profile placed on this region');
+    }
     ['x0', 'x1', 'y0', 'y1', 'z0', 'z1', 'lx', 'ly', 'lz'].forEach((f) => set(f, fmt(r[f])));
     set('volume', fmt(r.volume));
   }
 
+  /**
+   * The legend follows the view mode: in a doping view, a list of materials
+   * explains nothing about what the colours now mean.
+   */
   function renderLegend(regs) {
     const ul = $('#legend');
+    const title = $('#legend-title');
     if (!ul) return;
     ul.innerHTML = '';
+
+    const doping = S.colorMode !== 'material' && S.doping;
+    if (title) title.textContent = doping ? 'Doping' : 'Materials';
+
+    if (doping) {
+      const get = (n) => (S.doping.get ? S.doping.get(n) : S.doping[n]);
+      const classes = new Map();
+      let undoped = 0;
+      for (const r of regs) {
+        const d = get(r.name);
+        if (!d) { undoped++; continue; }
+        if (!classes.has(d.label)) {
+          classes.set(d.label, { color: d.color, range: d.range, n: 0,
+                                 type: d.netType === 'n' ? 'donors' : 'acceptors' });
+        }
+        classes.get(d.label).n++;
+      }
+      const order = ['N+', 'N', 'N-', 'P+', 'P', 'P-'];
+      for (const label of order) {
+        const c = classes.get(label);
+        if (!c) continue;
+        const li = document.createElement('li');
+        li.className = 'legend-doping';
+        li.innerHTML =
+          `<span class="swatch" style="background:${c.color}"></span>` +
+          `<span class="lname">${label}<small>${c.range}</small></span>` +
+          `<span class="lcount">${c.n}</span>`;
+        li.title = `${label}: ${c.type}, ${c.range}`;
+        ul.appendChild(li);
+      }
+      if (undoped) {
+        const li = document.createElement('li');
+        li.className = 'legend-doping';
+        li.innerHTML =
+          `<span class="swatch" style="background:${S.colorMode === 'doping' ? '#5a636e' : 'transparent'};` +
+          `border-style:dashed"></span>` +
+          `<span class="lname">undoped<small>no profile placed</small></span>` +
+          `<span class="lcount">${undoped}</span>`;
+        li.title = S.colorMode === 'combined'
+          ? 'drawn in its material colour' : 'no doping profile placed on this region';
+        ul.appendChild(li);
+      }
+      return;
+    }
+
     const mats = [...new Set(regs.map((r) => r.material))].sort();
     for (const m of mats) {
       const count = regs.filter((r) => r.material === m).length;
@@ -847,6 +950,9 @@
     resize: onResize,
     setContacts,
     setShowContacts,
+    setColorMode,
+    setDoping,
+    get colorMode() { return S.colorMode; },
     setFlagged,
     setClip,
     setMeasure,

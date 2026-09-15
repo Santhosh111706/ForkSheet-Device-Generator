@@ -1557,6 +1557,8 @@ function refreshPreview() {
      an emitter mistake cannot slip through unnoticed. */
   const an = analyseCurrent(app.lastScm, `the generated ${stem}.scm`);
   if (an && an.issues.length) {
+    // 'info' findings are descriptive - an intentional overlap is one -
+    // so only genuine errors may block a download
     const hard = an.issues.filter((i) => i.severity === 'error');
     const summary = consistencySummary(an.issues);
     if (hard.length) {
@@ -1692,6 +1694,9 @@ function doReset() {
   $('#mesh-prefix-mode').value = 'auto';
   $('#mesh-prefix-custom').value = 'fork1108';
   $('#scm-format').value = 'flat';
+  const col = $('#sel-colour');
+  if (col) { col.value = 'material'; }
+  if (window.Preview && window.Preview.setColorMode) window.Preview.setColorMode('material');
   clearImport(true);
   renderScript('');
   onModeChange();
@@ -2619,8 +2624,15 @@ function analyseCurrent(scmText, sourceLabel, extraIssues) {
   try {
     const parsed = window.SDE.parse(scmText);
     report = window.SDEAnalyze.analyze(parsed);
-    const chk = window.SDEAnalyze.check(parsed.regions, parsed.contacts);
+
+    // doping comes from the file's own profiles, never from a default
+    const dop = window.SDEAnalyze.dopingMap(parsed);
+    if (window.Preview && window.Preview.setDoping) window.Preview.setDoping(dop);
+
+    const chk = window.SDEAnalyze.check(parsed.regions, parsed.contacts, parsed);
     issues = issues.concat(chk.issues);
+    issues = issues.concat(
+      window.SDEAnalyze.checkRequired(parsed.regions, report.architecture));
   } catch (e) {
     issues.push({ kind: 'degenerate', severity: 'error',
                   message: 'Analysis failed: ' + e.message });
@@ -2669,7 +2681,7 @@ function setValidationBadge(issues, label) {
   const el = $('#validation-badge');
   if (!el) return;
   const errs = issues.filter((i) => i.severity === 'error').length;
-  const warns = issues.length - errs;
+  const warns = issues.filter((i) => i.severity === 'warn').length;
 
   el.hidden = false;
   if (errs) {
@@ -2732,6 +2744,12 @@ function wireIssueClicks(issues) {
 /* ------------------------------------------------------- viewer controls */
 function initViewerTools() {
   const on = (sel, ev, fn) => { const el = $(sel); if (el) el.addEventListener(ev, fn); };
+
+  on('#sel-colour', 'change', (e) => {
+    if (window.Preview && window.Preview.setColorMode) {
+      window.Preview.setColorMode(e.target.value);
+    }
+  });
 
   on('#chk-contacts', 'change', (e) => {
     if (window.Preview && window.Preview.setShowContacts) {

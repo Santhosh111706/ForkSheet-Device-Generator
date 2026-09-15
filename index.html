@@ -432,6 +432,15 @@
           </div>
 
           <div class="tool-group">
+            <span class="tool-label">Colour</span>
+            <select id="sel-colour" title="What the region colours mean">
+              <option value="material">Material</option>
+              <option value="doping">Doping concentration</option>
+              <option value="combined">Material + doping</option>
+            </select>
+          </div>
+
+          <div class="tool-group">
             <span class="tool-label">Opacity</span>
             <input id="opacity" type="range" min="10" max="100" value="100">
           </div>
@@ -527,10 +536,13 @@
           <tr><th>Y length</th><td data-f="ly">-</td></tr>
           <tr><th>Z length</th><td data-f="lz">-</td></tr>
           <tr><th>Volume</th><td data-f="volume">-</td></tr>
+          <tr><th>Doping type</th><td data-f="dop-type">-</td></tr>
+          <tr><th>Concentration</th><td data-f="dop-conc">-</td></tr>
+          <tr><th>Profile</th><td data-f="dop-profile">-</td></tr>
         </tbody></table>
       </div>
 
-      <div class="panel-title"><span>Materials</span></div>
+      <div class="panel-title"><span id="legend-title">Materials</span></div>
       <div class="panel-body">
         <ul id="legend" class="legend"></ul>
       </div>

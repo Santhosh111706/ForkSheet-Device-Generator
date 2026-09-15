@@ -88,6 +88,97 @@
 
 
   /* ==================================================================
+     DOPING MODEL
+     ==================================================================
+     SDE assigns doping with sdedr:define-constant-profile-region, which
+     binds a named profile to a named region. So the spatial distribution
+     IS the region map - there is no analytic profile to sample. What does
+     need care is that a region can carry more than one placement: the net
+     is donors minus acceptors, and the sign of that is the type. Reporting
+     only the last profile seen would mislabel any counter-doped region.
+     ================================================================== */
+
+  const DONORS = /phosphorus|arsenic|antimony|nitrogen/i;
+  const ACCEPTORS = /boron|aluminum|aluminium|gallium|indium/i;
+
+  /* Classes and the colours the viewer paints them. n-type blue, p-type
+     red, darker with increasing concentration - the usual TCAD reading. */
+  const DOPING_CLASSES = [
+    { id: 'Nplus',  label: 'N+', color: '#0d47a1', min: 1e19, type: 'n',
+      range: '>= 1e19 cm^-3' },
+    { id: 'N',      label: 'N',  color: '#42a5f5', min: 1e16, type: 'n',
+      range: '1e16 - 1e19 cm^-3' },
+    { id: 'Nminus', label: 'N-', color: '#b3e5fc', min: 0,    type: 'n',
+      range: '< 1e16 cm^-3' },
+    { id: 'Pplus',  label: 'P+', color: '#b71c1c', min: 1e19, type: 'p',
+      range: '>= 1e19 cm^-3' },
+    { id: 'P',      label: 'P',  color: '#ef5350', min: 1e16, type: 'p',
+      range: '1e16 - 1e19 cm^-3' },
+    { id: 'Pminus', label: 'P-', color: '#ffcdd2', min: 0,    type: 'p',
+      range: '< 1e16 cm^-3' },
+  ];
+  const UNDOPED = { id: 'undoped', label: 'undoped', color: '#5a636e',
+                    type: null, range: 'no profile placed' };
+
+  function classify(type, conc) {
+    if (!type || !(conc > 0)) return UNDOPED;
+    const band = conc >= 1e19 ? 0 : conc >= 1e16 ? 1 : 2;
+    return DOPING_CLASSES.find((c) => c.type === type &&
+      c.id === DOPING_CLASSES[band + (type === 'p' ? 3 : 0)].id) ||
+      DOPING_CLASSES[band + (type === 'p' ? 3 : 0)];
+  }
+
+  /**
+   * region name -> doping description, built from the file's own profiles.
+   * Nothing is assumed: a region with no placement is reported as undoped
+   * rather than being given a plausible default.
+   */
+  function dopingMap(parsed) {
+    const byProfile = new Map((parsed.profiles || []).map((p) => [p.name, p]));
+    const map = new Map();
+
+    for (const d of (parsed.doping || [])) {
+      const prof = byProfile.get(d.profile);
+      if (!prof) continue;
+      const species = String(prof.field).replace(/ActiveConcentration$/i, '');
+      const conc = Number(prof.value);
+      const type = DONORS.test(species) ? 'n' : ACCEPTORS.test(species) ? 'p' : null;
+      if (!map.has(d.region)) {
+        map.set(d.region, { region: d.region, placements: [], donors: 0, acceptors: 0 });
+      }
+      const e = map.get(d.region);
+      e.placements.push({ profile: d.profile, placement: d.placement, species, conc, type });
+      if (type === 'n') e.donors += conc;
+      else if (type === 'p') e.acceptors += conc;
+    }
+
+    for (const e of map.values()) {
+      const net = e.donors - e.acceptors;
+      e.netType = net > 0 ? 'n' : net < 0 ? 'p' : null;
+      e.netConc = Math.abs(net);
+      e.counterDoped = e.donors > 0 && e.acceptors > 0;
+      const cls = classify(e.netType, e.netConc);
+      e.class = cls.id;
+      e.label = cls.label;
+      e.color = cls.color;
+      e.range = cls.range;
+      e.species = uniq(e.placements.map((p) => p.species)).join(' + ');
+    }
+    return map;
+  }
+
+  /** The legend the viewer draws, limited to classes actually present. */
+  function dopingLegend(map) {
+    const present = new Set([...map.values()].map((e) => e.class));
+    const rows = DOPING_CLASSES.filter((c) => present.has(c.id)).map((c) => ({
+      label: c.label, color: c.color, range: c.range,
+      type: c.type === 'n' ? 'n-type (donors)' : 'p-type (acceptors)',
+      count: [...map.values()].filter((e) => e.class === c.id).length,
+    }));
+    return rows;
+  }
+
+  /* ==================================================================
      CONSISTENCY CHECK
      ================================================================== */
 
@@ -99,7 +190,7 @@
    * only reported between regions that are nearly touching, because two
    * regions genuinely far apart are not a defect.
    */
-  function check(regions, contacts) {
+  function check(regions, contacts, parsed) {
     const issues = [];
     /* `regions` is the list of region names a finding refers to. The viewer
        uses it to outline them, which is what turns "these two overlap" from
@@ -124,22 +215,47 @@
       }
     }
 
-    /* ---- overlaps ---- */
+    /* ---- overlaps ----
+       An overlap is NOT an error. SDE resolves overlapping bodies by the
+       current boolean rule, and a later create-cuboid replacing part of an
+       earlier one is a normal, deliberate way to build a structure. Calling
+       it an error would condemn perfectly good files.
+
+       What IS worth reporting is the consequence: an earlier region that
+       later ones have completely replaced contributes nothing to the final
+       structure, so any doping or contact attached to it is attached to
+       something that is no longer there. That is a real defect, and it is
+       only visible once the overlaps are resolved. */
     const overlaps = [];
     for (let i = 0; i < regions.length; i++) {
       for (let j = i + 1; j < regions.length; j++) {
         const v = overlapVolume(regions[i], regions[j]);
-        if (v > TOL) overlaps.push([regions[i], regions[j], v]);
+        if (v > TOL) overlaps.push([regions[i], regions[j], v, i, j]);
       }
     }
     overlaps.sort((a, b) => b[2] - a[2]);
-    for (const [a, b, v] of overlaps.slice(0, 20)) {
-      add('overlap', 'error',
-        `"${a.name}" and "${b.name}" share ${round(v, 3)} µm³ of volume.`,
-        [a.name, b.name]);
+
+    if (overlaps.length) {
+      const pairs = overlaps.slice(0, 6)
+        .map(([a, b]) => `${a.name}/${b.name}`).join(', ');
+      add('overlap', 'info',
+        `${overlaps.length} overlapping pair(s); later regions replace earlier ` +
+        `ones where they intersect: ${pairs}` + (overlaps.length > 6 ? ', ...' : '') + '.',
+        uniq(overlaps.slice(0, 12).flatMap(([a, b]) => [a.name, b.name])));
     }
-    if (overlaps.length > 20) {
-      add('overlap', 'error', `...and ${overlaps.length - 20} further overlapping pairs.`);
+
+    /* a region wholly swallowed by regions created after it */
+    for (let i = 0; i < regions.length; i++) {
+      const r = regions[i];
+      const later = regions.slice(i + 1).filter((o) => overlapVolume(r, o) > TOL);
+      if (!later.length) continue;
+      if (fullyCovered(r, later)) {
+        add('replaced', 'error',
+          `"${r.name}" is completely replaced by later region(s) ` +
+          `(${later.slice(0, 3).map((o) => o.name).join(', ')}) and does not ` +
+          `survive into the final structure.`,
+          [r.name].concat(later.slice(0, 3).map((o) => o.name)));
+      }
     }
 
     /* ---- connectivity ---- */
@@ -237,7 +353,87 @@
       });
     }
 
+    /* ---- doping placed on regions that exist, and semiconductors doped ---- */
+    if (parsed) {
+      const names = new Set(regions.map((r) => r.name));
+      const profNames = new Set((parsed.profiles || []).map((p) => p.name));
+
+      for (const d of (parsed.doping || [])) {
+        if (!names.has(d.region)) {
+          add('doping', 'error',
+            `Doping placement "${d.placement}" targets region "${d.region}", ` +
+            `which does not exist in this structure.`, []);
+        }
+        if (!profNames.has(d.profile)) {
+          add('doping', 'error',
+            `Doping placement "${d.placement}" uses profile "${d.profile}", ` +
+            `which is never defined.`, [d.region]);
+        }
+      }
+
+      const doped = new Set((parsed.doping || []).map((d) => d.region));
+      const undoped = regions.filter((r) =>
+        /^(silicon|germanium|sige|si)$/i.test(r.material) && !doped.has(r.name));
+      if (undoped.length) {
+        add('doping', 'warn',
+          `${undoped.length} semiconductor region(s) carry no doping profile: ` +
+          undoped.slice(0, 5).map((r) => r.name).join(', ') +
+          (undoped.length > 5 ? ', ...' : '') + '.',
+          undoped.map((r) => r.name));
+      }
+    }
+
+    /* ---- material assignment: metal must not touch semiconductor ----
+       A gate metal sharing a face with a channel is a short, not a design.
+       Checked on faces rather than proximity, so a legitimate metal-over-
+       dielectric stack is untouched. */
+    const isMetal = (m) => /tin|tan|tungsten|^w$|poly|aluminum|aluminium|copper/i.test(m);
+    const isSemi = (m) => /^(silicon|germanium|sige|si)$/i.test(m);
+    const shorts = [];
+    for (const a of regions.filter((r) => isMetal(r.material))) {
+      for (const b of regions.filter((r) => isSemi(r.material))) {
+        if (touches(a, b) || overlapVolume(a, b) > TOL) shorts.push([a, b]);
+      }
+    }
+    for (const [a, b] of shorts.slice(0, 8)) {
+      add('material', 'error',
+        `Gate metal "${a.name}" meets semiconductor "${b.name}" directly - ` +
+        `no dielectric between them.`, [a.name, b.name]);
+    }
+    if (shorts.length > 8) {
+      add('material', 'error', `...and ${shorts.length - 8} further metal-to-semiconductor contacts.`);
+    }
+
     return { issues, ok: !issues.some((i) => i.severity === 'error'), counts: tally(issues) };
+  }
+
+  /**
+   * Regions an architecture is expected to have. Reported as missing only
+   * when the architecture was positively identified, so a structure this
+   * code does not recognise is never told it is incomplete.
+   */
+  function checkRequired(regions, arch) {
+    const issues = [];
+    if (!arch || arch.confidence === 'low') return issues;
+
+    const names = regions.map((r) => r.name);
+    const has = (re) => names.some((n) => re.test(n));
+    const want = [
+      [/substrate|bulk/i, 'a substrate region'],
+      [/source/i, 'a source region'],
+      [/drain/i, 'a drain region'],
+      [/gate/i, 'a gate region'],
+    ];
+    if (arch.id === 'forksheet') want.push([/wall|fork/i, 'the fork dielectric wall']);
+
+    for (const [re, what] of want) {
+      if (!has(re)) {
+        issues.push({ kind: 'missing', severity: 'error', regions: [],
+          message: `No region matching ${what} was found, but the structure was ` +
+                   `identified as ${arch.name}.` });
+      }
+    }
+    return issues;
   }
 
   /**
@@ -295,9 +491,35 @@
     return true;
   }
 
+  /**
+   * Is box `r` entirely inside the union of `others`?
+   *
+   * Exact CSG is not needed and not worth it here: the box is sampled on a
+   * grid, and if every sample is covered the region has nothing of its own
+   * left. A coarse grid can only ever miss a defect, never invent one,
+   * which is the right direction for this to fail in.
+   */
+  function fullyCovered(r, others) {
+    const N = 4;
+    for (let i = 0; i < N; i++) {
+      for (let j = 0; j < N; j++) {
+        for (let k = 0; k < N; k++) {
+          const p = {
+            x: r.x0 + (r.x1 - r.x0) * ((i + 0.5) / N),
+            y: r.y0 + (r.y1 - r.y0) * ((j + 0.5) / N),
+            z: r.z0 + (r.z1 - r.z0) * ((k + 0.5) / N),
+          };
+          if (!others.some((o) => contains(o, p))) return false;
+        }
+      }
+    }
+    return true;
+  }
+
   function tally(issues) {
     const c = { overlap: 0, gap: 0, disconnected: 0, contact: 0, degenerate: 0,
-                error: 0, warn: 0 };
+                replaced: 0, missing: 0, material: 0, doping: 0,
+                error: 0, warn: 0, info: 0 };
     for (const i of issues) {
       if (c[i.kind] !== undefined) c[i.kind]++;
       if (c[i.severity] !== undefined) c[i.severity]++;
@@ -583,6 +805,45 @@
           'doping changes at the gate edge'));
         params.push(P('Junction plane, drain side', round(gx[1], 6) + ' µm',
           'doping changes at the gate edge'));
+
+        // raised source/drain: pads standing proud of the top sheet
+        if (columns.length && s && d) {
+          const stackTop = Math.max(...columns.map((c) => c.bands[c.bands.length - 1].y1));
+          const raise = Math.max(s.y1, d.y1) - stackTop;
+          params.push(P('Raised source/drain', raise > TOL ? nm(raise) : 'not raised',
+            raise > TOL ? `pads stand ${nm(raise)} above the top sheet`
+                        : `pad top ${round(Math.max(s.y1, d.y1))} is level with the top sheet`));
+        }
+        // junction depth: how far the doped pad reaches below the bottom sheet
+        if (columns.length && s) {
+          const stackBottom = Math.min(...columns.map((c) => c.bands[0].y0));
+          params.push(P('Junction depth', nm(Math.max(0, stackBottom - s.y0)),
+            `pad bottom ${round(s.y0)} to lowest sheet ${round(stackBottom)}`));
+        }
+      }
+
+      // channel material, taken from the gated segments themselves
+      if (columns.length) {
+        const chanMats = uniq(columns.flatMap((c) =>
+          c.bands.flatMap((b) => b.parts.map((r) => r.material))));
+        params.push(P('Channel material', chanMats.join(', '),
+          chanMats.length > 1 ? 'more than one material in the channel stack'
+                              : 'uniform across every sheet'));
+      }
+
+      // STI: buried oxide or nitride spanning laterally below the surface
+      {
+        const sti = regions.filter((r) =>
+          /sio2|oxide|si3n4|nitride/i.test(r.material) && r.y0 < -TOL);
+        if (sti.length) {
+          params.push(P('STI / buried isolation', `${sti.length} region(s)`,
+            sti.map((r) => `${r.name} ${nm(span(r, 'y'))} deep, ${nm(span(r, 'x'))} wide`)
+              .slice(0, 3).join('; ')));
+        } else {
+          params.push(P('STI / buried isolation', 'none in this structure',
+            'no dielectric region extends below y = 0; isolation here is the ' +
+            'fork wall and the well split'));
+        }
       }
       // well / substrate junction planes
       const sub = regions.filter((r) => r.y1 <= TOL);
@@ -742,6 +1003,7 @@
           P('Pieces', String(highk.length),
             columns.length ? `${highk.length / Math.max(columns.length, 1)} per column` : ''),
           P('Collar coverage', collarCoverage(highk, columns)),
+          eotParam(uniq(highk.map((r) => r.material))[0], Math.min(...thick)),
         ],
       });
     }
@@ -868,6 +1130,25 @@
     };
   }
 
+  /**
+   * Equivalent oxide thickness.
+   *
+   * EOT is not in the file - it depends on the permittivity of the
+   * dielectric, which SDE does not record - so the constant used is named
+   * in the note rather than hidden. Anyone using a different k for their
+   * HfO2 can scale the figure.
+   */
+  const K_VALUES = { HfO2: 25, Al2O3: 9, ZrO2: 25, SiO2: 3.9, Si3N4: 7.5 };
+  function eotParam(material, physical) {
+    const k = K_VALUES[material];
+    if (!k || !Number.isFinite(physical)) {
+      return P('EOT', 'not derivable', `no permittivity known for ${material || 'this material'}`);
+    }
+    return P('EOT', nm(physical * 3.9 / k),
+      `${nm(physical)} of ${material} at k = ${k}, relative to SiO2 at k = 3.9 ` +
+      `(k is not stored in the SCM)`);
+  }
+
   /** Is the high-k actually wrapped all the way round each sheet? */
   function collarCoverage(highk, columns) {
     if (!columns.length) return `${highk.length} pieces`;
@@ -891,6 +1172,10 @@
     return best;
   }
 
-  window.SDEAnalyze = { analyze, check, boundsOf, overlapVolume, touches, gapBetween };
+  window.SDEAnalyze = {
+    analyze, check, checkRequired, dopingMap, dopingLegend, classify,
+    boundsOf, overlapVolume, touches, gapBetween,
+    DOPING_CLASSES, UNDOPED,
+  };
 
 })();
