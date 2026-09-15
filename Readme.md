@@ -60,6 +60,12 @@ Everything runs in the browser.
 - A consistency check runs before every generation and reports overlaps,
   empty gaps, disconnected regions, invalid contacts and degenerate boxes.
   Errors block the download; nothing inconsistent can be saved
+- An alignment group reports the relationships rather than bare numbers:
+  source-to-gate and drain-to-gate distances, source/drain symmetry,
+  channel-to-gate and channel-to-source/drain continuity, spacer-to-gate
+  and spacer-to-source abutment, inner and outer spacer pieces, dielectric
+  enclosure, nFET/pFET stack alignment and complementary device spacing -
+  each with a verdict, not just a measurement
 
 **Editable parameters**
 
@@ -107,6 +113,17 @@ Everything runs in the browser.
 - Perspective and orthographic projection
 - Surface and wireframe modes, opacity slider, edge toggle
 - XYZ axes indicator
+- **Contact markers** drawn at each pick point, colour-coded and labelled.
+  Drawn at the point, not over the region, so a misplaced contact is
+  visibly floating in space or buried inside the structure
+- **Cross-section**: a cutting plane on X, Y or Z with a position slider
+  and a flip, for inspecting the inside of the stack
+- **Measurement**: click two regions for centre-to-centre distance and the
+  face-to-face gap on each axis, drawn in the scene and reported in full
+- **Problem highlighting**: every validation finding is clickable and
+  outlines the regions it refers to, so "these two overlap" becomes
+  something you can look at
+- **Validation badge** over the canvas, always showing the current verdict
 - Resizes correctly with the browser window, with the sidebars, and after an
   Android orientation change
 
@@ -274,10 +291,21 @@ and the contact that lands on nothing.
 | 6 | 148 | 43 | 5 | clean |
 | 8 | 188 | 55 | 7 | clean |
 
-A note on scope: SDE geometry files do not carry a work function. A contact
-set stores a name, a colour and a display line width; the work function is a
-device property and belongs in `sdevice.cmd`. The analyser says so rather
-than inventing a value.
+Two notes on scope, because the honest answer is more useful than a
+plausible-looking number:
+
+**Work function is not in a `.scm`.** A contact set stores a name, a colour
+and a display line width - the numeric argument to
+`sdegeo:define-contact-set` is the line width, not a work function. Work
+function is a device property and belongs in `sdevice.cmd`. The analyser
+reports this rather than inventing a value.
+
+**Some listed features are not present in this architecture.** There is no
+STI in the Forksheet baseline - isolation is the Si3N4 fork wall and the
+well split - and the source/drain pads are not raised. The analyser reports
+what the loaded structure actually contains; it will report STI or raised
+source/drain if a file that has them is loaded, and says nothing about them
+when it is not.
 
 Output from this generator was loaded into the SCM Device Viewer and passed
 all eleven geometry checks: 88 regions, 5 materials, 7 contacts, no overlaps,

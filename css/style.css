@@ -577,6 +577,69 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .hint .dim { display: block; font-size: 11.5px; }
 .hint.err { color: var(--err); pointer-events: auto; }
 
+/* -------------------------------------------- viewer overlays */
+/* Both sit over the canvas, so they need an explicit [hidden] rule: an id
+   selector with a display of its own outranks the user agent's. */
+.vbadge {
+  position: absolute;
+  top: 10px; left: 10px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 20px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid var(--line-2);
+  background: rgba(15,19,25,.88);
+  pointer-events: none;
+}
+#validation-badge[hidden], #measure-readout[hidden] { display: none; }
+.vbadge::before {
+  content: "";
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+.vbadge.ok    { color: var(--ok);   border-color: rgba(53,196,106,.45); }
+.vbadge.warn  { color: var(--warn); border-color: rgba(232,163,61,.45); }
+.vbadge.error { color: var(--err);  border-color: rgba(239,77,77,.5); }
+
+.measure-readout {
+  position: absolute;
+  bottom: 10px; left: 10px;
+  z-index: 3;
+  max-width: min(340px, calc(100% - 20px));
+  padding: 8px 11px;
+  border-radius: 5px;
+  border: 1px solid var(--line-2);
+  border-left: 3px solid #ffe14d;
+  background: rgba(15,19,25,.92);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--fg);
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+.measure-readout strong { color: #ffe14d; font-weight: 600; }
+
+#btn-measure[aria-pressed="true"] {
+  border-color: #ffe14d;
+  color: #ffe14d;
+  background: var(--bg-3);
+}
+#viewport.measuring { cursor: crosshair; }
+
+.preview-tools input[type="range"]#section-at { width: 84px; min-width: 60px; }
+.preview-tools input:disabled { opacity: .4; }
+
+/* a finding you can click to see where it is */
+.an-issue.clickable { cursor: pointer; }
+.an-issue.clickable:hover { background: var(--bg-3); }
+.an-issue.active { outline: 1px solid var(--accent); }
+
 /* ------------------------------------------------------------- inspector */
 .panel-title {
   display: flex;

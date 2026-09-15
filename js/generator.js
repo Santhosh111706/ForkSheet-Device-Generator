@@ -1670,6 +1670,7 @@ function doSweep() {
 }
 
 function doReset() {
+  clearFlags();
   for (const [k, v] of Object.entries(DEFAULT_PARAMS)) {
     const el = document.getElementById(k);
     if (el) el.value = v;
@@ -1773,9 +1774,10 @@ function initGenerator() {
   $('#mesh-prefix-custom').disabled = true;
   onModeChange();
 
-  // import (file + paste) and the script view
+  // import (file + paste), the script view and the viewer tools
   initImport();
   initScriptView();
+  initViewerTools();
 
   // layout: sidebar resizing, drawer mode, viewport watchers
   initLayout();
@@ -2624,6 +2626,9 @@ function analyseCurrent(scmText, sourceLabel, extraIssues) {
                   message: 'Analysis failed: ' + e.message });
   }
   renderAnalysis(report, issues, sourceLabel);
+  wireIssueClicks(issues);
+  setValidationBadge(issues, report ? 'Geometry consistent' : 'No structure');
+  showContactsFor(scmText);
   return { report, issues };
 }
 
@@ -2636,4 +2641,137 @@ function consistencySummary(issues) {
     if (counts[k]) parts.push(`${counts[k]} ${k}`);
   }
   return parts.join(', ');
+}
+
+
+/* ==========================================================================
+   11. VIEWER TOOLS
+   --------------------------------------------------------------------------
+   The pieces that connect what the analyser found to what is on screen:
+   contact markers, clickable findings that outline the regions they refer
+   to, a cutting plane, a measuring tool and a validation badge.
+   ========================================================================== */
+
+/** Remember the last findings so a click can look one up. */
+const viewerState = { issues: [], activeIssue: -1 };
+
+/** Draw the contacts of whatever structure is loaded. */
+function showContactsFor(scmText) {
+  if (!window.SDE || !window.Preview || !window.Preview.setContacts) return;
+  try {
+    const parsed = window.SDE.parse(scmText);
+    window.Preview.setContacts(parsed.contacts || []);
+  } catch (_) { /* the badge already reports a parse problem */ }
+}
+
+/** The always-visible verdict over the canvas. */
+function setValidationBadge(issues, label) {
+  const el = $('#validation-badge');
+  if (!el) return;
+  const errs = issues.filter((i) => i.severity === 'error').length;
+  const warns = issues.length - errs;
+
+  el.hidden = false;
+  if (errs) {
+    el.className = 'vbadge error';
+    el.textContent = `${errs} geometry error${errs > 1 ? 's' : ''}` +
+                     (warns ? `, ${warns} note${warns > 1 ? 's' : ''}` : '');
+  } else if (warns) {
+    el.className = 'vbadge warn';
+    el.textContent = `${warns} geometry note${warns > 1 ? 's' : ''}`;
+  } else {
+    el.className = 'vbadge ok';
+    el.textContent = label || 'Geometry consistent';
+  }
+}
+
+/** Outline the regions a finding refers to, and frame it in the list. */
+function focusIssue(index) {
+  const issue = viewerState.issues[index];
+  if (!issue || !window.Preview || !window.Preview.setFlagged) return;
+
+  viewerState.activeIssue = index;
+  document.querySelectorAll('.an-issue').forEach((el, k) =>
+    el.classList.toggle('active', k === index));
+
+  if (!issue.regions || !issue.regions.length) {
+    window.Preview.setFlagged([], issue.severity);
+    setStatus('warn', issue.kind + ': nothing to outline',
+      [issue.message, 'this finding is not about a specific region']);
+    return;
+  }
+  window.Preview.setFlagged(issue.regions, issue.severity);
+  setStatus(issue.severity === 'error' ? 'error' : 'warn',
+    `${issue.kind}: ${issue.regions.length} region(s) highlighted`,
+    [issue.message].concat(issue.regions.slice(0, 8)));
+}
+
+function clearFlags() {
+  if (window.Preview && window.Preview.setFlagged) window.Preview.setFlagged([]);
+  viewerState.activeIssue = -1;
+  document.querySelectorAll('.an-issue').forEach((el) => el.classList.remove('active'));
+}
+
+/** Make every rendered finding clickable. Called after each render. */
+function wireIssueClicks(issues) {
+  viewerState.issues = issues || [];
+  viewerState.activeIssue = -1;
+  document.querySelectorAll('#analysis-body .an-issue').forEach((el, k) => {
+    if (k >= viewerState.issues.length) return;
+    el.classList.add('clickable');
+    el.setAttribute('role', 'button');
+    el.setAttribute('tabindex', '0');
+    el.title = 'Highlight the regions this refers to';
+    el.addEventListener('click', () => focusIssue(k));
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusIssue(k); }
+    });
+  });
+}
+
+/* ------------------------------------------------------- viewer controls */
+function initViewerTools() {
+  const on = (sel, ev, fn) => { const el = $(sel); if (el) el.addEventListener(ev, fn); };
+
+  on('#chk-contacts', 'change', (e) => {
+    if (window.Preview && window.Preview.setShowContacts) {
+      window.Preview.setShowContacts(e.target.checked);
+    }
+  });
+
+  /* ---- cross-section ---- */
+  const applySection = () => {
+    const axis = $('#sel-section').value;
+    const t = Number($('#section-at').value) / 100;
+    const flip = $('#btn-section-flip').getAttribute('aria-pressed') === 'true';
+    $('#section-at').disabled = !axis;
+    $('#btn-section-flip').disabled = !axis;
+    if (window.Preview && window.Preview.setClip) {
+      window.Preview.setClip(axis || null, t, flip);
+    }
+  };
+  on('#sel-section', 'change', applySection);
+  on('#section-at', 'input', applySection);
+  on('#btn-section-flip', 'click', () => {
+    const b = $('#btn-section-flip');
+    b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'));
+    applySection();
+  });
+
+  /* ---- measuring ---- */
+  on('#btn-measure', 'click', () => {
+    const b = $('#btn-measure');
+    const now = b.getAttribute('aria-pressed') !== 'true';
+    b.setAttribute('aria-pressed', String(now));
+    b.textContent = now ? 'Measuring' : 'Measure';
+    $('#viewport').classList.toggle('measuring', now);
+    const read = $('#measure-readout');
+    if (read) {
+      read.hidden = !now;
+      read.textContent = 'Click a region, then a second one.';
+    }
+    if (window.Preview && window.Preview.setMeasure) window.Preview.setMeasure(now);
+  });
+
+  on('#btn-clear-flags', 'click', clearFlags);
 }

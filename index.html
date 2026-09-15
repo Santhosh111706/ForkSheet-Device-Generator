@@ -439,12 +439,36 @@
           <div class="tool-group">
             <label class="chk"><input type="checkbox" id="chk-edges" checked> Edges</label>
             <label class="chk"><input type="checkbox" id="chk-axes" checked> Axes</label>
+            <label class="chk"><input type="checkbox" id="chk-contacts" checked> Contacts</label>
+          </div>
+
+          <div class="tool-group">
+            <span class="tool-label">Section</span>
+            <select id="sel-section">
+              <option value="">Off</option>
+              <option value="x">X plane</option>
+              <option value="y">Y plane</option>
+              <option value="z">Z plane</option>
+            </select>
+            <input id="section-at" type="range" min="0" max="100" value="50" disabled
+                   title="Move the cutting plane">
+            <button id="btn-section-flip" class="btn tiny" type="button" disabled
+                    title="Show the other half">Flip</button>
+          </div>
+
+          <div class="tool-group">
+            <button id="btn-measure" class="btn tiny" type="button" aria-pressed="false"
+                    title="Click two regions to measure between them">Measure</button>
+            <button id="btn-clear-flags" class="btn tiny" type="button"
+                    title="Clear the problem highlights">Clear marks</button>
           </div>
         </div>
       </div>
 
       <div class="preview-body">
         <div id="viewport">
+          <div id="validation-badge" class="vbadge" hidden></div>
+          <div id="measure-readout" class="measure-readout" hidden></div>
           <div id="viewer-hint" class="hint">
             building preview&hellip;
             <span class="dim">left-drag rotate &middot; right-drag pan &middot; scroll zoom &middot; click a region</span>

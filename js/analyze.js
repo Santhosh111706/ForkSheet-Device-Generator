@@ -101,8 +101,11 @@
    */
   function check(regions, contacts) {
     const issues = [];
-    const add = (kind, severity, message, detail) =>
-      issues.push({ kind, severity, message, detail: detail || null });
+    /* `regions` is the list of region names a finding refers to. The viewer
+       uses it to outline them, which is what turns "these two overlap" from
+       a sentence into something you can look at. */
+    const add = (kind, severity, message, names) =>
+      issues.push({ kind, severity, message, regions: names || [] });
 
     if (!regions || !regions.length) {
       add('degenerate', 'error', 'The structure contains no regions.');
@@ -116,7 +119,7 @@
         if (s <= TOL) {
           add('degenerate', 'error',
             `Region "${r.name}" has zero or negative ${ax.toUpperCase()} extent (${round(s)}).`,
-            r.name);
+            [r.name]);
         }
       }
     }
@@ -133,7 +136,7 @@
     for (const [a, b, v] of overlaps.slice(0, 20)) {
       add('overlap', 'error',
         `"${a.name}" and "${b.name}" share ${round(v, 3)} µm³ of volume.`,
-        `${a.name} | ${b.name}`);
+        [a.name, b.name]);
     }
     if (overlaps.length > 20) {
       add('overlap', 'error', `...and ${overlaps.length - 20} further overlapping pairs.`);
@@ -170,7 +173,7 @@
         add('disconnected', 'error',
           `${names.length} region(s) touch nothing else in the structure: ` +
           names.slice(0, 6).join(', ') + (names.length > 6 ? ', ...' : '') + '.',
-          names.join(' | '));
+          names);
       }
     }
 
@@ -207,7 +210,7 @@
     for (const [a, b, g] of nearGaps.slice(0, 12)) {
       add('gap', 'warn',
         `"${a.name}" and "${b.name}" are ${nm(g)} apart - too small to be deliberate spacing.`,
-        `${a.name} | ${b.name}`);
+        [a.name, b.name]);
     }
     if (nearGaps.length > 12) {
       add('gap', 'warn', `...and ${nearGaps.length - 12} further sub-2 nm gaps.`);
@@ -216,20 +219,20 @@
     /* ---- contacts ---- */
     for (const c of (contacts || [])) {
       if (!c.faces || !c.faces.length) {
-        add('contact', 'warn', `Contact set "${c.name}" is declared but never placed on a face.`, c.name);
+        add('contact', 'warn', `Contact set "${c.name}" is declared but never placed on a face.`, []);
         continue;
       }
       c.faces.forEach((p, k) => {
         if (!p) {
           add('contact', 'warn',
-            `Contact "${c.name}" placement ${k + 1} has no resolvable pick point.`, c.name);
+            `Contact "${c.name}" placement ${k + 1} has no resolvable pick point.`, []);
           return;
         }
         const owners = regions.filter((r) => contains(r, p));
         if (!owners.length) {
           add('contact', 'error',
             `Contact "${c.name}" picks (${round(p.x)}, ${round(p.y)}, ${round(p.z)}), ` +
-            `which is not on any region.`, c.name);
+            `which is not on any region.`, []);
         }
       });
     }
@@ -604,6 +607,125 @@
         }
       }
       if (params.length) groups.push({ title: 'Source / drain, junctions, substrate', params });
+    }
+
+    /* ---------------- alignment and relationships ----------------
+       Distances between features, and a verdict on each one. A number on
+       its own does not say whether the structure is right; "gate starts
+       exactly where the spacer ends" does. */
+    if (metal.length && columns.length) {
+      const params = [];
+      const gx0 = Math.min(...metal.map((r) => r.x0));
+      const gx1 = Math.max(...metal.map((r) => r.x1));
+      const semi = regions.filter((r) => /silicon|germanium|sige/i.test(r.material));
+      const verdict = (ok, good, bad) => (ok ? 'ALIGNED - ' + good : 'CHECK - ' + bad);
+
+      /* The pad edge, not the extension edge. The extension runs right up
+         to the gate, so an inclusive test finds the gate edge itself and
+         reports a source-to-gate distance of zero. Strictly-less-than
+         skips the extension and lands on the pad, which is the distance
+         that was being asked for - and it comes out equal to the spacer
+         thickness, as it should. */
+      const padL = semi.filter((r) => r.x1 < gx0 - TOL && r.y1 > TOL)
+        .map((r) => r.x1).sort((a, b) => b - a)[0];
+      const padR = semi.filter((r) => r.x0 > gx1 + TOL && r.y1 > TOL)
+        .map((r) => r.x0).sort((a, b) => a - b)[0];
+      if (padL !== undefined) {
+        params.push(P('Source-to-gate distance', nm(gx0 - padL),
+          'source pad edge ' + round(padL) + ' to gate edge ' + round(gx0)));
+      }
+      if (padR !== undefined) {
+        params.push(P('Drain-to-gate distance', nm(padR - gx1),
+          'gate edge ' + round(gx1) + ' to drain pad edge ' + round(padR)));
+      }
+      if (padL !== undefined && padR !== undefined) {
+        const sym = Math.abs((gx0 - padL) - (padR - gx1));
+        params.push(P('Source/drain symmetry', sym <= TOL ? 'symmetric' : nm(sym) + ' difference',
+          verdict(sym <= TOL, 'both sides equal', 'the two sides differ')));
+      }
+
+      // channel relative to the gate
+      for (const [i, c] of columns.entries()) {
+        const chan = c.bands[0].parts.filter((r) =>
+          r.x0 >= gx0 - TOL && r.x1 <= gx1 + TOL);
+        if (chan.length) {
+          const cx0 = Math.min(...chan.map((r) => r.x0));
+          const cx1 = Math.max(...chan.map((r) => r.x1));
+          const ok = eq(cx0, gx0) && eq(cx1, gx1);
+          params.push(P(`Channel-to-gate, column ${i + 1}`,
+            ok ? 'coincident' : `${nm(Math.abs(cx0 - gx0))} / ${nm(Math.abs(cx1 - gx1))} offset`,
+            verdict(ok, 'the gated length is exactly the channel segment',
+                    'the channel does not start and end on the gate edges')));
+        }
+        // the sheet stack must reach both pads
+        const band = c.bands[0].parts;
+        if (band.length) {
+          const x0 = Math.min(...band.map((r) => r.x0));
+          const x1 = Math.max(...band.map((r) => r.x1));
+          const reaches = padL !== undefined && padR !== undefined &&
+                          eq(x0, padL) && eq(x1, padR);
+          params.push(P(`Channel-to-S/D, column ${i + 1}`,
+            reaches ? 'continuous' : `${round(x0)} .. ${round(x1)}`,
+            verdict(reaches, 'sheet meets both pads with no gap',
+                    'sheet does not span pad edge to pad edge')));
+        }
+      }
+
+      // spacers relative to the gate
+      const spacers = nitride.filter((r) => !arch.wall || r.name !== arch.wall.name);
+      if (spacers.length) {
+        const left = spacers.filter((r) => eq(r.x1, gx0));
+        const right = spacers.filter((r) => eq(r.x0, gx1));
+        const ok = left.length > 0 && right.length > 0;
+        params.push(P('Spacer-to-gate', ok ? 'abutting both edges'
+          : `${left.length} left, ${right.length} right`,
+          verdict(ok, 'spacers meet the gate with no gap or overlap',
+                  'at least one side does not meet the gate edge')));
+        if (padL !== undefined && left.length) {
+          const sx0 = Math.min(...left.map((r) => r.x0));
+          params.push(P('Spacer-to-source', eq(sx0, padL) ? 'abutting' : nm(Math.abs(sx0 - padL)),
+            verdict(eq(sx0, padL), 'spacer meets the source pad',
+                    'spacer does not meet the source pad edge')));
+        }
+        // inner vs outer: a spacer between the sheets is an inner spacer
+        const stackY = columns.length
+          ? [columns[0].bands[0].y0, columns[0].bands[columns[0].bands.length - 1].y1]
+          : null;
+        if (stackY) {
+          const inner = spacers.filter((r) => r.y0 >= stackY[0] - TOL && r.y1 <= stackY[1] + TOL);
+          const outer = spacers.filter((r) => !(r.y0 >= stackY[0] - TOL && r.y1 <= stackY[1] + TOL));
+          params.push(P('Inner spacer pieces', String(inner.length),
+            inner.length ? 'between the sheets, thickness ' +
+              nm(Math.min(...inner.map((r) => span(r, 'x')))) : 'none inside the stack'));
+          params.push(P('Outer spacer pieces', String(outer.length),
+            outer.length ? 'above, below or beside the stack, thickness ' +
+              nm(Math.min(...outer.map((r) => span(r, 'x')))) : 'none'));
+        }
+      }
+
+      // dielectric enclosure of each sheet
+      if (highk.length && columns.length) {
+        const perSheet = highk.length / columns.reduce((a, c) => a + c.bands.length, 0);
+        params.push(P('Dielectric enclosure', perSheet >= 4 ? 'closed on all four sides'
+          : round(perSheet, 3) + ' slabs per sheet',
+          verdict(perSheet >= 4, 'no path from channel to metal avoids the collar',
+                  'the collar does not fully enclose each sheet')));
+      }
+
+      // the two devices, for a forksheet
+      if (columns.length >= 2) {
+        const dz = columns[1].z0 - columns[0].z1;
+        const sameY = eq(columns[0].bands[0].y0, columns[1].bands[0].y0) &&
+                      columns[0].bands.length === columns[1].bands.length;
+        params.push(P('nFET/pFET stack alignment', sameY ? 'level, equal sheet count'
+          : 'stacks differ',
+          verdict(sameY, 'both devices sit at the same heights',
+                  'the two stacks are not at matching heights')));
+        params.push(P('Complementary device spacing', nm(dz),
+          'channel edge to channel edge across the wall'));
+      }
+
+      if (params.length) groups.push({ title: 'Alignment and relationships', params });
     }
 
     /* ---------------- gate dielectric ---------------- */
