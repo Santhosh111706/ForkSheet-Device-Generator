@@ -52,6 +52,25 @@ const DEFAULT_CONSTANTS = {
   MESH_MIN_X: 0.003,
   MESH_MIN_Y: 0.001,
   MESH_MIN_Z: 0.003,
+  // stack height: the V8 baseline is three sheets, but nothing below
+  // assumes it any more
+  N_SHEETS: 3,
+};
+
+/* Doping concentrations, cm^-3. These were literals inside the SCM template;
+   they are parameters now, because "doping concentrations and profiles" is
+   part of the design, not part of the boilerplate. Names match the profile
+   names emitted into the script. */
+const DEFAULT_DOPING = {
+  D_BULK:  1e17,      // p-type substrate
+  D_PWELL: 1e17,
+  D_NWELL: 1e17,
+  D_NCHAN: 3e17,      // nMOS channel, lightly p
+  D_NEXT:  5e19,      // nMOS extension under the spacer
+  D_NSD:   1e20,      // nMOS source/drain pad
+  D_PCHAN: 3e17,      // pMOS channel, lightly n
+  D_PEXT:  5e19,
+  D_PSD:   1e20,
 };
 
 /* Default sweep lists, matching T_NS_VALUES / W_NS_VALUES / T_FORK_VALUES. */
@@ -124,26 +143,47 @@ function compute(t_ns, w_ns, t_fork, C) {
   //   sheet-to-sheet pitch = sheet + HfO2 above + HfO2 below + metal gap
   g.y_pitch = t_ns + 2 * C.T_HFO2 + C.T_METAL;
 
-  g.ya1 = g.ygb1 + C.T_HFO2;       // sheet 1 bottom
-  g.yb1 = g.ya1 + t_ns;            // sheet 1 top
-  g.ya2 = g.ya1 + g.y_pitch;       // sheet 2 bottom
-  g.yb2 = g.ya2 + t_ns;
-  g.ya3 = g.ya2 + g.y_pitch;       // sheet 3 bottom
-  g.yb3 = g.ya3 + t_ns;
+  /* The stack is built as a list rather than as ya1..yb3, so the number of
+     sheets is a parameter instead of a fact hard-coded in six places. The
+     ya1/yb1..ya3/yb3 names are still published below, because the V8
+     template and its `(define ya1 ...)` block are written in terms of them. */
+  const N = Math.max(1, Math.round(C.N_SHEETS || 3));
+  g.N_SHEETS = N;
+  g.sheets = [];
+  for (let i = 0; i < N; i++) {
+    const a = g.ygb1 + C.T_HFO2 + i * g.y_pitch;
+    g.sheets.push({ a, b: a + t_ns });
+  }
 
-  g.ygt0 = g.yb3 + C.T_HFO2;       // gate_top bottom
+  /* One gate-metal band between each adjacent pair of sheets, inset by the
+     collar thickness top and bottom. With N sheets there are N-1 of them. */
+  g.inter = [];
+  for (let i = 0; i + 1 < N; i++) {
+    g.inter.push({
+      lo: g.sheets[i].b + C.T_HFO2,
+      hi: g.sheets[i + 1].a - C.T_HFO2,
+      tag: String(i) + String(i + 1),
+    });
+  }
+
+  const top = g.sheets[N - 1];
+  g.ygt0 = top.b + C.T_HFO2;       // gate_top bottom
   g.ygt1 = g.ygt0 + C.T_METAL;     // device top
 
-  g.yi01_0 = g.yb1 + C.T_HFO2;     // gate_inter01 band
-  g.yi01_1 = g.ya2 - C.T_HFO2;
-  g.yi12_0 = g.yb2 + C.T_HFO2;     // gate_inter12 band
-  g.yi12_1 = g.ya3 - C.T_HFO2;
+  // the three-sheet names the V8 template is written against
+  g.ya1 = g.sheets[0].a; g.yb1 = g.sheets[0].b;
+  g.ya2 = (g.sheets[1] || top).a; g.yb2 = (g.sheets[1] || top).b;
+  g.ya3 = (g.sheets[2] || top).a; g.yb3 = (g.sheets[2] || top).b;
+  g.yi01_0 = g.inter[0] ? g.inter[0].lo : g.yb1;
+  g.yi01_1 = g.inter[0] ? g.inter[0].hi : g.yb1;
+  g.yi12_0 = g.inter[1] ? g.inter[1].lo : g.yb2;
+  g.yi12_1 = g.inter[1] ? g.inter[1].hi : g.yb2;
 
   g.ybr0 = g.ygb1;                 // gate bridges span the whole stack
   g.ybr1 = g.ygt0;
 
   g.y_sd0 = 0.0;                   // S/D pad bottom
-  g.y_sd1 = g.yb3;                 // S/D pad top follows sheet 3
+  g.y_sd1 = top.b;                 // S/D pad top follows the topmost sheet
 
   g.ysub0 = -C.T_SUB;
   g.ywell = -C.T_WELL;
@@ -200,7 +240,7 @@ function regionList(g, C) {
   add('Substrate_NW',   'Silicon', g.x0, g.x3, g.ywell, g.ysub1, g.z_well, g.zpg1);
   add('ForkWall',       'Si3N4',   g.x0, g.x3, g.ysub1, g.ygt1,  g.zw0,  g.zw1);
 
-  const sheets = [['1', g.ya1, g.yb1], ['2', g.ya2, g.yb2], ['3', g.ya3, g.yb3]];
+  const sheets = g.sheets.map((s, i) => [String(i + 1), s.a, s.b]);
 
   const device = (tag, zga, zha, zca, zcb, zhb, zgb) => {
     add(tag + '_GateLiner', 'SiO2',    g.xg0, g.xg1, g.yl0,   g.yl1,   zga, zgb);
@@ -220,16 +260,21 @@ function regionList(g, C) {
     add(tag + '_gate_bottom',   'TiN', g.xg0, g.xg1, g.ygb0,   g.ygb1,   zga, zgb);
     add(tag + '_gate_bridge_L', 'TiN', g.xg0, g.xg1, g.ybr0,   g.ybr1,   zga, zha);
     add(tag + '_gate_bridge_R', 'TiN', g.xg0, g.xg1, g.ybr0,   g.ybr1,   zhb, zgb);
-    add(tag + '_gate_inter01',  'TiN', g.xg0, g.xg1, g.yi01_0, g.yi01_1, zha, zhb);
-    add(tag + '_gate_inter12',  'TiN', g.xg0, g.xg1, g.yi12_0, g.yi12_1, zha, zhb);
+    for (const band of g.inter) {
+      add(`${tag}_gate_inter${band.tag}`, 'TiN', g.xg0, g.xg1, band.lo, band.hi, zha, zhb);
+    }
     add(tag + '_gate_top',      'TiN', g.xg0, g.xg1, g.ygt0,   g.ygt1,   zga, zgb);
     for (const [sp, xa, xb] of [['S', g.x1, g.xg0], ['D', g.xg1, g.x2]]) {
       add(`${tag}_Sp${sp}_zlo`, 'Si3N4', xa, xb, g.yl0, g.ygt1, zga, zca);
       add(`${tag}_Sp${sp}_zhi`, 'Si3N4', xa, xb, g.yl0, g.ygt1, zcb, zgb);
-      add(`${tag}_Sp${sp}_b`,   'Si3N4', xa, xb, g.yl0, g.ya1,  zca, zcb);
-      add(`${tag}_Sp${sp}_m1`,  'Si3N4', xa, xb, g.yb1, g.ya2,  zca, zcb);
-      add(`${tag}_Sp${sp}_m2`,  'Si3N4', xa, xb, g.yb2, g.ya3,  zca, zcb);
-      add(`${tag}_Sp${sp}_t`,   'Si3N4', xa, xb, g.yb3, g.ygt1, zca, zcb);
+      // the spacer fills the gate window except where the sheets pass through
+      add(`${tag}_Sp${sp}_b`, 'Si3N4', xa, xb, g.yl0, g.sheets[0].a, zca, zcb);
+      for (let i = 0; i + 1 < g.sheets.length; i++) {
+        add(`${tag}_Sp${sp}_m${i + 1}`, 'Si3N4', xa, xb,
+            g.sheets[i].b, g.sheets[i + 1].a, zca, zcb);
+      }
+      add(`${tag}_Sp${sp}_t`, 'Si3N4', xa, xb,
+          g.sheets[g.sheets.length - 1].b, g.ygt1, zca, zcb);
     }
   };
 
@@ -285,6 +330,14 @@ function validate(t_ns, w_ns, t_fork, C) {
   if (t_fork < 0.002) {
     errs.push(`T_FORK = ${t_fork} um gives less than 2 nm of nitride between nMOS and pMOS; isolation would be lost`);
   }
+  const nSheets = Math.round(C.N_SHEETS || 3);
+  if (!Number.isFinite(nSheets) || nSheets < 1) {
+    errs.push(`N_SHEETS must be at least 1 (got ${C.N_SHEETS})`);
+  } else if (nSheets > 12) {
+    errs.push(`N_SHEETS = ${nSheets} is beyond what this structure is meant for (max 12)`);
+  }
+  if (errs.length) return { errs, warns, g: null, R: null };
+
   if (C.L_G <= 2 * C.T_SPACER) {
     errs.push(`L_G = ${C.L_G} must exceed 2 x T_SPACER = ${2 * C.T_SPACER}`);
   }
@@ -313,7 +366,13 @@ function validate(t_ns, w_ns, t_fork, C) {
 
   // -- 2. valid nanosheet spacing ----------------------------------------
   const need = 2 * C.T_HFO2 + C.T_METAL;
-  for (const [nm, gp] of [['sheet1-sheet2', g.ya2 - g.yb1], ['sheet2-sheet3', g.ya3 - g.yb2]]) {
+  // one check per adjacent pair, so a 1- or 2-sheet stack has fewer pairs
+  // rather than being measured against sheets that do not exist
+  const gaps = [];
+  for (let i = 0; i + 1 < g.sheets.length; i++) {
+    gaps.push([`sheet${i + 1}-sheet${i + 2}`, g.sheets[i + 1].a - g.sheets[i].b]);
+  }
+  for (const [nm, gp] of gaps) {
     if (gp < need - EPS) {
       errs.push(`${nm} spacing ${gp.toFixed(6)} um is below the ${need.toFixed(6)} um needed for HfO2 + metal + HfO2`);
     }
@@ -342,7 +401,7 @@ function validate(t_ns, w_ns, t_fork, C) {
   for (const tag of ['n', 'p']) {
     const src = R.find((r) => r.name === `${tag}_Source`);
     const drn = R.find((r) => r.name === `${tag}_Drain`);
-    for (const st of ['1', '2', '3']) {
+    for (const st of g.sheets.map((_, i) => String(i + 1))) {
       const a = R.find((r) => r.name === `${tag}_Sheet${st}_extS`);
       const b = R.find((r) => r.name === `${tag}_Sheet${st}_chan`);
       const c = R.find((r) => r.name === `${tag}_Sheet${st}_extD`);
@@ -394,7 +453,7 @@ function validate(t_ns, w_ns, t_fork, C) {
 
   // -- 8. HfO2 collar closure --------------------------------------------
   for (const [tag, zca, zcb] of [['n', g.znc0, g.znc1], ['p', g.zpc0, g.zpc1]]) {
-    for (const [st, a, b] of [['s1', g.ya1, g.yb1], ['s2', g.ya2, g.yb2], ['s3', g.ya3, g.yb3]]) {
+    for (const [st, a, b] of g.sheets.map((sh, i) => ['s' + (i + 1), sh.a, sh.b])) {
       const c = R.filter((r) => r.name.startsWith(`${tag}_HfO2_${st}`));
       if (c.length !== 4) { errs.push(`${tag}MOS ${st}: expected 4 HfO2 slabs, found ${c.length}`); continue; }
       const below = c.some((r) => Math.abs(r.y1 - a) < EPS);
@@ -472,6 +531,14 @@ function n(v) {
   if (s.endsWith('.')) s += '0';
   if (s === '-0.0' || s === '-0.') s = '0.0';
   return s;
+}
+
+/** A doping concentration in the 1e17 / 5e19 form SDE scripts use. */
+function conc(v) {
+  if (!Number.isFinite(v)) return '0';
+  if (v === 0) return '0';
+  const s = v.toExponential().replace('e+', 'e');
+  return s.replace(/^(\d)e/, '$1e');
 }
 
 function buildScm(G, meshPrefix, C) {
@@ -989,9 +1056,11 @@ function cuboid(name, material, ax, bx, ay, by, az, bz) {
 }
 
 /** Every create-cuboid for one transistor, expanded, in build order. */
-function flatDevice(tag, zga, zha, zca, zcb, zhb, zgb) {
+function flatDevice(tag, zga, zha, zca, zcb, zhb, zgb, G) {
   const L = [];
-  const sheets = [['1', 'ya1', 'yb1'], ['2', 'ya2', 'yb2'], ['3', 'ya3', 'yb3']];
+  const N = G.sheets.length;
+  const sheets = G.sheets.map((_, i) => [String(i + 1), 'ya' + (i + 1), 'yb' + (i + 1)]);
+  const topB = 'yb' + N;
 
   L.push(cuboid(`${tag}_GateLiner`, 'SiO2',    'xg0', 'xg1', 'yl0', 'yl1', zga, zgb));
   L.push(cuboid(`${tag}_Source`,    'Silicon', 'x0',  'x1',  'y_sd0', 'y_sd1', zga, zgb));
@@ -1016,33 +1085,38 @@ function flatDevice(tag, zga, zha, zca, zcb, zhb, zgb) {
   L.push(cuboid(`${tag}_gate_bottom`,   'TiN', 'xg0', 'xg1', 'ygb0',   'ygb1',   zga, zgb));
   L.push(cuboid(`${tag}_gate_bridge_L`, 'TiN', 'xg0', 'xg1', 'ybr0',   'ybr1',   zga, zha));
   L.push(cuboid(`${tag}_gate_bridge_R`, 'TiN', 'xg0', 'xg1', 'ybr0',   'ybr1',   zhb, zgb));
-  L.push(cuboid(`${tag}_gate_inter01`,  'TiN', 'xg0', 'xg1', 'yi01_0', 'yi01_1', zha, zhb));
-  L.push(cuboid(`${tag}_gate_inter12`,  'TiN', 'xg0', 'xg1', 'yi12_0', 'yi12_1', zha, zhb));
+  for (const band of G.inter) {
+    L.push(cuboid(`${tag}_gate_inter${band.tag}`, 'TiN', 'xg0', 'xg1',
+                  `yi${band.tag}_0`, `yi${band.tag}_1`, zha, zhb));
+  }
   L.push(cuboid(`${tag}_gate_top`,      'TiN', 'xg0', 'xg1', 'ygt0',   'ygt1',   zga, zgb));
   L.push('');
 
   for (const [sp, xa, xb] of [['S', 'x1', 'xg0'], ['D', 'xg1', 'x2']]) {
     L.push(cuboid(`${tag}_Sp${sp}_zlo`, 'Si3N4', xa, xb, 'yl0', 'ygt1', zga, zca));
     L.push(cuboid(`${tag}_Sp${sp}_zhi`, 'Si3N4', xa, xb, 'yl0', 'ygt1', zcb, zgb));
-    L.push(cuboid(`${tag}_Sp${sp}_b`,   'Si3N4', xa, xb, 'yl0', 'ya1',  zca, zcb));
-    L.push(cuboid(`${tag}_Sp${sp}_m1`,  'Si3N4', xa, xb, 'yb1', 'ya2',  zca, zcb));
-    L.push(cuboid(`${tag}_Sp${sp}_m2`,  'Si3N4', xa, xb, 'yb2', 'ya3',  zca, zcb));
-    L.push(cuboid(`${tag}_Sp${sp}_t`,   'Si3N4', xa, xb, 'yb3', 'ygt1', zca, zcb));
+    L.push(cuboid(`${tag}_Sp${sp}_b`, 'Si3N4', xa, xb, 'yl0', 'ya1', zca, zcb));
+    for (let i = 0; i + 1 < N; i++) {
+      L.push(cuboid(`${tag}_Sp${sp}_m${i + 1}`, 'Si3N4', xa, xb,
+                    'yb' + (i + 1), 'ya' + (i + 2), zca, zcb));
+    }
+    L.push(cuboid(`${tag}_Sp${sp}_t`, 'Si3N4', xa, xb, topB, 'ygt1', zca, zcb));
   }
   return L;
 }
 
 /** Doping profile placements for one transistor. n gets As/B, p gets B/P. */
-function flatDoping(tag) {
+function flatDoping(tag, N) {
   const T = tag.toUpperCase() === 'N' ? 'n' : 'p';
   const L = [];
+  const ids = Array.from({ length: N }, (_, i) => String(i + 1));
   L.push(`(sdedr:define-constant-profile-region "Pl_${T}Src" "Prof_${T}SD" "${tag}_Source")`);
   L.push(`(sdedr:define-constant-profile-region "Pl_${T}Drn" "Prof_${T}SD" "${tag}_Drain")`);
-  for (const st of ['1', '2', '3']) {
+  for (const st of ids) {
     L.push(`(sdedr:define-constant-profile-region "Pl_${T}S${st}_eS" "Prof_${T}Ext" "${tag}_Sheet${st}_extS")`);
     L.push(`(sdedr:define-constant-profile-region "Pl_${T}S${st}_eD" "Prof_${T}Ext" "${tag}_Sheet${st}_extD")`);
   }
-  for (const st of ['1', '2', '3']) {
+  for (const st of ids) {
     L.push(`(sdedr:define-constant-profile-region "Pl_${T}S${st}_ch" "Prof_${T}Chan" "${tag}_Sheet${st}_chan")`);
   }
   return L;
@@ -1082,17 +1156,19 @@ function buildFlatScm(G, meshPrefix, C) {
     push(`(define ${k.padEnd(7)} ${n(v)})`);
   }
   push('');
-  for (const [k, v] of [['yl0', G.yl0], ['yl1', G.yl1], ['ygb0', G.ygb0], ['ygb1', G.ygb1],
-                        ['y_pitch', G.y_pitch], ['ya1', G.ya1], ['yb1', G.yb1],
-                        ['ya2', G.ya2], ['yb2', G.yb2], ['ya3', G.ya3], ['yb3', G.yb3],
-                        ['ygt0', G.ygt0], ['ygt1', G.ygt1],
-                        ['yi01_0', G.yi01_0], ['yi01_1', G.yi01_1],
-                        ['yi12_0', G.yi12_0], ['yi12_1', G.yi12_1],
-                        ['ybr0', G.ybr0], ['ybr1', G.ybr1],
-                        ['y_sd0', G.y_sd0], ['y_sd1', G.y_sd1],
-                        ['ysub0', G.ysub0], ['ywell', G.ywell], ['ysub1', G.ysub1]]) {
-    push(`(define ${k.padEnd(7)} ${n(v)})`);
+  const yDefs = [['yl0', G.yl0], ['yl1', G.yl1], ['ygb0', G.ygb0], ['ygb1', G.ygb1],
+                 ['y_pitch', G.y_pitch]];
+  G.sheets.forEach((sh, i) => {
+    yDefs.push(['ya' + (i + 1), sh.a], ['yb' + (i + 1), sh.b]);
+  });
+  yDefs.push(['ygt0', G.ygt0], ['ygt1', G.ygt1]);
+  for (const band of G.inter) {
+    yDefs.push([`yi${band.tag}_0`, band.lo], [`yi${band.tag}_1`, band.hi]);
   }
+  yDefs.push(['ybr0', G.ybr0], ['ybr1', G.ybr1],
+             ['y_sd0', G.y_sd0], ['y_sd1', G.y_sd1],
+             ['ysub0', G.ysub0], ['ywell', G.ywell], ['ysub1', G.ysub1]);
+  for (const [k, v] of yDefs) push(`(define ${k.padEnd(7)} ${n(v)})`);
   push('');
   for (const [k, v] of [['zng0', G.zng0], ['znh0', G.znh0], ['znc0', G.znc0], ['znc1', G.znc1],
                         ['znh1', G.znh1], ['zng1', G.zng1], ['zw0', G.zw0], ['zw1', G.zw1],
@@ -1110,29 +1186,40 @@ function buildFlatScm(G, meshPrefix, C) {
   push('');
   push(cuboid('ForkWall', 'Si3N4', 'x0', 'x3', 'ysub1', 'ygt1', 'zw0', 'zw1'));
   push('');
-  push(...flatDevice('n', 'zng0', 'znh0', 'znc0', 'znc1', 'znh1', 'zng1'));
+  push(...flatDevice('n', 'zng0', 'znh0', 'znc0', 'znc1', 'znh1', 'zng1', G));
   push('');
-  push(...flatDevice('p', 'zpg0', 'zph0', 'zpc0', 'zpc1', 'zph1', 'zpg1'));
+  push(...flatDevice('p', 'zpg0', 'zph0', 'zpc0', 'zpc1', 'zph1', 'zpg1', G));
   push('');
 
   // ---- doping ----
-  push('(sdedr:define-constant-profile "Prof_Bulk"    "BoronActiveConcentration"      1e17)');
-  push('(sdedr:define-constant-profile "Prof_PWell"   "BoronActiveConcentration"      1e17)');
-  push('(sdedr:define-constant-profile "Prof_NWell"   "PhosphorusActiveConcentration" 1e17)');
-  push('(sdedr:define-constant-profile "Prof_nChan"   "BoronActiveConcentration"      3e17)');
-  push('(sdedr:define-constant-profile "Prof_nExt"    "ArsenicActiveConcentration"    5e19)');
-  push('(sdedr:define-constant-profile "Prof_nSD"     "ArsenicActiveConcentration"    1e20)');
-  push('(sdedr:define-constant-profile "Prof_pChan"   "PhosphorusActiveConcentration" 3e17)');
-  push('(sdedr:define-constant-profile "Prof_pExt"    "BoronActiveConcentration"      5e19)');
-  push('(sdedr:define-constant-profile "Prof_pSD"     "BoronActiveConcentration"      1e20)');
+  /* Resolve against the defaults rather than trusting C to be complete.
+     A missing key would otherwise be emitted as a concentration of 0, which
+     is not a loud failure - it is a script that runs and produces an
+     undoped, meaningless device. */
+  const dose = (key) => {
+    const v = C[key];
+    return Number.isFinite(v) ? v : DEFAULT_DOPING[key];
+  };
+  const dop = (name, field, key) =>
+    push(`(sdedr:define-constant-profile "${name}"${' '.repeat(Math.max(1, 12 - name.length))}` +
+         `"${field}"${' '.repeat(Math.max(1, 31 - field.length))}${conc(dose(key))})`);
+  dop('Prof_Bulk',  'BoronActiveConcentration',      'D_BULK');
+  dop('Prof_PWell', 'BoronActiveConcentration',      'D_PWELL');
+  dop('Prof_NWell', 'PhosphorusActiveConcentration', 'D_NWELL');
+  dop('Prof_nChan', 'BoronActiveConcentration',      'D_NCHAN');
+  dop('Prof_nExt',  'ArsenicActiveConcentration',    'D_NEXT');
+  dop('Prof_nSD',   'ArsenicActiveConcentration',    'D_NSD');
+  dop('Prof_pChan', 'PhosphorusActiveConcentration', 'D_PCHAN');
+  dop('Prof_pExt',  'BoronActiveConcentration',      'D_PEXT');
+  dop('Prof_pSD',   'BoronActiveConcentration',      'D_PSD');
   push('');
   push('(sdedr:define-constant-profile-region "Pl_Bulk"  "Prof_Bulk"  "Substrate_Bulk")');
   push('(sdedr:define-constant-profile-region "Pl_PWell" "Prof_PWell" "Substrate_PW")');
   push('(sdedr:define-constant-profile-region "Pl_NWell" "Prof_NWell" "Substrate_NW")');
   push('');
-  push(...flatDoping('n'));
+  push(...flatDoping('n', G.sheets.length));
   push('');
-  push(...flatDoping('p'));
+  push(...flatDoping('p', G.sheets.length));
   push('');
 
   // ---- contacts ----
@@ -1159,6 +1246,8 @@ function buildFlatScm(G, meshPrefix, C) {
   push('');
 
   // ---- mesh ----
+  // the junction windows bracket the whole stack, so they follow its top
+  const topSheet = 'yb' + G.sheets.length;
   push('(sdedr:define-refinement-size "RS_global" 0.020 0.020 0.020 0.006 0.006 0.006)');
   push('(sdedr:define-refinement-window "RW_global" "Cuboid" (position x0 ysub0 zng0) (position x3 ygt1 zpg1))');
   push('(sdedr:define-refinement-placement "RP_global" "RS_global" "RW_global")');
@@ -1170,13 +1259,13 @@ function buildFlatScm(G, meshPrefix, C) {
   push('(sdedr:define-refinement-placement "RP_actP" "RS_active" "RW_actP")');
   push('');
   push('(sdedr:define-refinement-size "RS_junc" 0.002 0.002 0.005 0.0015 0.001 0.003)');
-  push('(sdedr:define-refinement-window "RW_jNs" "Cuboid" (position (- xg0 0.005) ya1 znh0) (position (+ xg0 0.005) yb3 znh1))');
+  push(`(sdedr:define-refinement-window "RW_jNs" "Cuboid" (position (- xg0 0.005) ya1 znh0) (position (+ xg0 0.005) ${topSheet} znh1))`);
   push('(sdedr:define-refinement-placement "RP_jNs" "RS_junc" "RW_jNs")');
-  push('(sdedr:define-refinement-window "RW_jNd" "Cuboid" (position (- xg1 0.005) ya1 znh0) (position (+ xg1 0.006) yb3 znh1))');
+  push(`(sdedr:define-refinement-window "RW_jNd" "Cuboid" (position (- xg1 0.005) ya1 znh0) (position (+ xg1 0.006) ${topSheet} znh1))`);
   push('(sdedr:define-refinement-placement "RP_jNd" "RS_junc" "RW_jNd")');
-  push('(sdedr:define-refinement-window "RW_jPs" "Cuboid" (position (- xg0 0.005) ya1 zph0) (position (+ xg0 0.005) yb3 zph1))');
+  push(`(sdedr:define-refinement-window "RW_jPs" "Cuboid" (position (- xg0 0.005) ya1 zph0) (position (+ xg0 0.005) ${topSheet} zph1))`);
   push('(sdedr:define-refinement-placement "RP_jPs" "RS_junc" "RW_jPs")');
-  push('(sdedr:define-refinement-window "RW_jPd" "Cuboid" (position (- xg1 0.005) ya1 zph0) (position (+ xg1 0.006) yb3 zph1))');
+  push(`(sdedr:define-refinement-window "RW_jPd" "Cuboid" (position (- xg1 0.005) ya1 zph0) (position (+ xg1 0.006) ${topSheet} zph1))`);
   push('(sdedr:define-refinement-placement "RP_jPd" "RS_junc" "RW_jPd")');
   push('');
   push('(sdedr:define-refinement-size "RS_well" 0.020 0.010 0.008 0.008 0.004 0.004)');
@@ -1270,10 +1359,21 @@ function scmFormat() {
  * in step by a test that parses both and compares the region lists.
  */
 function emitScm(g, meshPrefix, C, format) {
-  const mode = format || scmFormat();
+  let mode = format || scmFormat();
+  /* buildScm() is the V8 template: its helper procedures and its
+     (define ya1 ...) block are written for exactly three sheets. Rather
+     than emit a file whose defines disagree with its geometry, anything
+     other than three falls back to the step-by-step emitter, which builds
+     from the sheet list and has no such assumption. */
+  if (mode !== 'flat' && g.sheets && g.sheets.length !== 3) mode = 'flat';
   if (mode === 'annotated') return buildScm(g, meshPrefix, C);
   if (mode === 'structured') return stripScmComments(buildScm(g, meshPrefix, C));
   return buildFlatScm(g, meshPrefix, C);
+}
+
+/** True when the chosen format cannot represent the current stack. */
+function formatForcedFlat(g) {
+  return scmFormat() !== 'flat' && g && g.sheets && g.sheets.length !== 3;
 }
 
 
@@ -1331,6 +1431,9 @@ function readConstants() {
   const C = {};
   for (const key of Object.keys(DEFAULT_CONSTANTS)) {
     C[key] = readNumber(key, DEFAULT_CONSTANTS[key]);
+  }
+  for (const key of Object.keys(DEFAULT_DOPING)) {
+    C[key] = readNumber(key, DEFAULT_DOPING[key]);
   }
   return C;
 }
@@ -1449,6 +1552,31 @@ function refreshPreview() {
   setDownloadEnabled(true);
 
   if (window.Preview) window.Preview.setRegions(res.R);
+
+  /* Consistency gate: measure the emitted script rather than the model, so
+     an emitter mistake cannot slip through unnoticed. */
+  const an = analyseCurrent(app.lastScm, `the generated ${stem}.scm`);
+  if (an && an.issues.length) {
+    const hard = an.issues.filter((i) => i.severity === 'error');
+    const summary = consistencySummary(an.issues);
+    if (hard.length) {
+      setStatus('error', `Geometry check failed - ${summary}`,
+        hard.slice(0, 8).map((i) => `${i.kind}: ${i.message}`));
+      setDownloadEnabled(false);
+    } else {
+      setStatus('warn', `Valid, with ${an.issues.length} geometry note(s)`,
+        msg.concat(res.warns, an.issues.slice(0, 6).map((i) => `${i.kind}: ${i.message}`)));
+    }
+  }
+
+  if (formatForcedFlat(res.g)) {
+    const note = $('#scm-format');
+    if (note) {
+      setStatus('warn', `Step-by-step output (stack is ${res.g.sheets.length} sheets)`,
+        msg.concat(['the structured V8 formats are written for 3 sheets, so ' +
+                    'this stack is emitted step-by-step instead']));
+    }
+  }
 }
 
 /* ---------------------------------------------------------------- actions */
@@ -1550,6 +1678,12 @@ function doReset() {
     const el = document.getElementById(k);
     if (el) el.value = v;
   }
+  for (const [k, v] of Object.entries(DEFAULT_DOPING)) {
+    const el = document.getElementById(k);
+    // a number input accepts "1e17"; assigning the raw value would render
+    // it as 100000000000000000, which nobody can read or edit
+    if (el) el.value = conc(v);
+  }
   $('#sweep-T_NS').value   = DEFAULT_SWEEP.T_NS;
   $('#sweep-W_NS').value   = DEFAULT_SWEEP.W_NS;
   $('#sweep-T_FORK').value = DEFAULT_SWEEP.T_FORK;
@@ -1585,6 +1719,12 @@ function initGenerator() {
   for (const [k, v] of Object.entries(DEFAULT_CONSTANTS)) {
     const el = document.getElementById(k);
     if (el) el.value = v;
+  }
+  for (const [k, v] of Object.entries(DEFAULT_DOPING)) {
+    const el = document.getElementById(k);
+    // a number input accepts "1e17"; assigning the raw value would render
+    // it as 100000000000000000, which nobody can read or edit
+    if (el) el.value = conc(v);
   }
   $('#sweep-T_NS').value   = DEFAULT_SWEEP.T_NS;
   $('#sweep-W_NS').value   = DEFAULT_SWEEP.W_NS;
@@ -1652,7 +1792,7 @@ document.addEventListener('DOMContentLoaded', () => {
 window.Generator = {
   compute, regionList, validate, buildScm, buildFlatScm, emitScm, stripScmComments,
   caseName, materialColor, n,
-  DEFAULT_PARAMS, DEFAULT_CONSTANTS,
+  DEFAULT_PARAMS, DEFAULT_CONSTANTS, DEFAULT_DOPING,
 };
 
 
@@ -2220,8 +2360,10 @@ function loadSdeText(text, label) {
 
     const set = (id, v) => {
       const el = document.getElementById(id);
-      if (el && typeof v === 'number' && Number.isFinite(v)) { el.value = v; return true; }
-      return false;
+      if (!el || typeof v !== 'number' || !Number.isFinite(v)) return false;
+      // doping is written in exponent form, everything else as it comes
+      el.value = /^D_/.test(id) ? conc(v) : v;
+      return true;
     };
     set('T_NS', b.T_NS);
     set('W_NS', b.W_NS);
@@ -2238,6 +2380,29 @@ function loadSdeText(text, label) {
       if (set(constMap[key], b[key])) picked.push(constMap[key]);
     }
 
+    // sheet count comes from the geometry, not from a define
+    let sheetsFound = 0;
+    if (window.SDEAnalyze) {
+      try {
+        const rep = window.SDEAnalyze.analyze(parsed);
+        if (rep.ok && rep.columns.length) {
+          sheetsFound = rep.columns[0].bands.length;
+          if (set('N_SHEETS', sheetsFound)) picked.push('N_SHEETS');
+        }
+      } catch (_) { /* fall back to whatever is in the field */ }
+    }
+
+    // doping concentrations come from the profile definitions
+    const profMap = {
+      Prof_Bulk: 'D_BULK', Prof_PWell: 'D_PWELL', Prof_NWell: 'D_NWELL',
+      Prof_nChan: 'D_NCHAN', Prof_nExt: 'D_NEXT', Prof_nSD: 'D_NSD',
+      Prof_pChan: 'D_PCHAN', Prof_pExt: 'D_PEXT', Prof_pSD: 'D_PSD',
+    };
+    for (const prof of (parsed.profiles || [])) {
+      const field = profMap[prof.name];
+      if (field && set(field, prof.value)) picked.push(field);
+    }
+
     if (parsed.meshPrefix) {
       $('#mesh-prefix-mode').value = 'custom';
       $('#mesh-prefix-custom').disabled = false;
@@ -2250,8 +2415,10 @@ function loadSdeText(text, label) {
     setImportStatus('ok',
       '<strong>Loaded as parameters.</strong> ' + src + ' defines T_NS, W_NS and ' +
       'the fork wall, so the generator is driving the preview again. ' +
-      picked.length + ' design constant(s) came from the input, and ' +
+      picked.length + ' further parameter(s) were measured from the file' +
+      (sheetsFound ? ' (including a ' + sheetsFound + '-sheet stack)' : '') + ', and ' +
       parsed.regions.length + ' region(s) were read back to confirm it parses. ' +
+      'The Structure analysis panel lists everything that was measured. ' +
       'Edit any control to regenerate.');
     const cb = $('#btn-clear-import');
     if (cb) cb.disabled = true;
@@ -2282,6 +2449,7 @@ function loadSdeText(text, label) {
   setDownloadEnabled(true);
 
   summariseImport(parsed.regions, parsed);
+  analyseCurrent(cleaned, imported.name);
   showImportBanner(imported.name);
   const cb = $('#btn-clear-import');
   if (cb) cb.disabled = false;
@@ -2350,4 +2518,122 @@ function initImport() {
     openCard();
     readFile(f);
   });
+}
+
+
+/* ==========================================================================
+   10. STRUCTURE ANALYSIS AND THE PRE-GENERATION CONSISTENCY GATE
+   --------------------------------------------------------------------------
+   Whatever is on screen - a structure the generator built, or one that was
+   imported - is measured by the same code and reported the same way. The
+   panel shows what the geometry IS; the gate below it decides whether it is
+   fit to be written out.
+
+   The gate runs two checkers, because they are good at different things:
+
+     validate()          knows the Forksheet rules: gate connectivity,
+                         collar closure, S/D continuity, contact placement.
+                         Sharp, but only for the parametric model.
+     SDEAnalyze.check()  knows no architecture at all: overlaps, empty gaps,
+                         islands, contacts that land on nothing. Runs on
+                         anything, including imported files.
+
+   Neither subsumes the other, so both run and their findings are merged.
+   ========================================================================== */
+
+/** Render the measured-parameter report into the sidebar panel. */
+function renderAnalysis(report, issues, sourceLabel) {
+  const body = $('#analysis-body');
+  const sub = $('#analysis-sub');
+  if (!body) return;
+
+  if (!report || !report.ok) {
+    body.innerHTML = '<p class="note">Generate or import a structure to measure it.</p>';
+    if (sub) sub.textContent = '';
+    return;
+  }
+
+  const esc = escapeHtml;
+  const out = [];
+
+  if (sub) {
+    sub.textContent = `${report.architecture.name} · ${report.regionCount} regions`;
+  }
+
+  for (const g of report.groups) {
+    out.push('<div class="an-group">');
+    out.push(`<div class="an-head">${esc(g.title)}</div>`);
+    for (const p of g.params) {
+      out.push('<div class="an-row">' +
+        `<span class="an-label">${esc(p.label)}</span>` +
+        `<span class="an-value">${esc(String(p.value))}</span>` +
+        (p.note ? `<span class="an-note">${esc(p.note)}</span>` : '') +
+        '</div>');
+    }
+    if (g.evidence && g.evidence.length) {
+      out.push('<ul class="an-evidence">' +
+        g.evidence.map((e) => `<li>${esc(e)}</li>`).join('') + '</ul>');
+    }
+    out.push('</div>');
+  }
+
+  /* ---- consistency report ---- */
+  out.push('<div class="an-group an-issues">');
+  out.push('<div class="an-head">Consistency check</div>');
+  if (!issues || !issues.length) {
+    out.push('<div class="an-clean">No overlaps, gaps, disconnected regions or ' +
+             'invalid contacts found.</div>');
+  } else {
+    const shown = issues.slice(0, 40);
+    for (const i of shown) {
+      out.push(`<div class="an-issue ${esc(i.severity)}">` +
+        `<span class="kind">${esc(i.kind)}</span>` +
+        `<span>${esc(i.message)}</span></div>`);
+    }
+    if (issues.length > shown.length) {
+      out.push(`<div class="an-issue warn"><span class="kind">more</span>` +
+        `<span>${issues.length - shown.length} further finding(s) not listed.</span></div>`);
+    }
+  }
+  if (sourceLabel) {
+    out.push(`<p class="an-evidence" style="padding-left:0">Measured from ${esc(sourceLabel)}.</p>`);
+  }
+  out.push('</div>');
+
+  body.innerHTML = out.join('');
+}
+
+/**
+ * Analyse whatever is currently on screen and run the consistency gate.
+ *
+ * Takes the SCM text rather than the region list, deliberately: parsing the
+ * text back is what proves the emitted file describes the structure the app
+ * thinks it does. A mistake in the emitter shows up here as a discrepancy
+ * instead of being invisible.
+ */
+function analyseCurrent(scmText, sourceLabel, extraIssues) {
+  if (!window.SDE || !window.SDEAnalyze) return null;
+  let report = null, issues = (extraIssues || []).slice();
+  try {
+    const parsed = window.SDE.parse(scmText);
+    report = window.SDEAnalyze.analyze(parsed);
+    const chk = window.SDEAnalyze.check(parsed.regions, parsed.contacts);
+    issues = issues.concat(chk.issues);
+  } catch (e) {
+    issues.push({ kind: 'degenerate', severity: 'error',
+                  message: 'Analysis failed: ' + e.message });
+  }
+  renderAnalysis(report, issues, sourceLabel);
+  return { report, issues };
+}
+
+/** Fold the generic checker's findings into the status panel wording. */
+function consistencySummary(issues) {
+  const counts = {};
+  for (const i of issues) counts[i.kind] = (counts[i.kind] || 0) + 1;
+  const parts = [];
+  for (const k of ['overlap', 'gap', 'disconnected', 'contact', 'degenerate']) {
+    if (counts[k]) parts.push(`${counts[k]} ${k}`);
+  }
+  return parts.join(', ');
 }

@@ -119,9 +119,10 @@
       <div class="section-head"><h2>Study parameters</h2><span class="chev"></span></div>
       <div class="section-body">
         <p class="note">
-          The three geometry parameters of the self-heating study. All lengths
-          are in micrometres (1&nbsp;nm = 0.001&nbsp;&micro;m). Every other
-          coordinate in the structure is recomputed from these.
+          The primary geometry parameters. All lengths are in micrometres
+          (1&nbsp;nm = 0.001&nbsp;&micro;m). Every other coordinate in the
+          structure is recomputed from these, and from the design constants
+          and doping below.
         </p>
 
         <div class="field">
@@ -140,6 +141,15 @@
             <span class="unit">&micro;m</span>
           </div>
           <small>Transverse (Z) extent of each sheet. Drives the HfO<sub>2</sub> collars, gate bridges and the pMOS offset.</small>
+        </div>
+
+        <div class="field">
+          <label for="N_SHEETS">N_SHEETS &mdash; number of stacked channels</label>
+          <div class="ctl">
+            <input id="N_SHEETS" type="number" step="1" min="1" max="12" value="3">
+            <span class="unit">sheets</span>
+          </div>
+          <small>Sheets per transistor. Every dependent band, spacer piece, collar and doping placement is rebuilt from this. The structured V8 formats are written for 3; other counts emit step-by-step.</small>
         </div>
 
         <div class="field">
@@ -280,6 +290,56 @@
       </div>
     </div>
 
+    <!-- ---------- doping ---------- -->
+    <div class="card collapsed">
+      <div class="section-head"><h2>Doping concentrations</h2><span class="chev"></span></div>
+      <div class="section-body">
+        <p class="note">
+          Active concentrations in cm<sup>&minus;3</sup>, written straight into the
+          profile definitions. Each one is bound to named regions, so a change
+          follows the geometry rather than a coordinate window.
+        </p>
+        <div class="grid2">
+          <div class="field compact">
+            <label for="D_BULK">Substrate bulk &mdash; Boron</label>
+            <div class="ctl"><input id="D_BULK" type="number" step="1e16" value="1e17"></div>
+          </div>
+          <div class="field compact">
+            <label for="D_PWELL">p-well &mdash; Boron</label>
+            <div class="ctl"><input id="D_PWELL" type="number" step="1e16" value="1e17"></div>
+          </div>
+          <div class="field compact">
+            <label for="D_NWELL">n-well &mdash; Phosphorus</label>
+            <div class="ctl"><input id="D_NWELL" type="number" step="1e16" value="1e17"></div>
+          </div>
+          <div class="field compact">
+            <label for="D_NCHAN">nMOS channel &mdash; Boron</label>
+            <div class="ctl"><input id="D_NCHAN" type="number" step="1e16" value="3e17"></div>
+          </div>
+          <div class="field compact">
+            <label for="D_NEXT">nMOS extension &mdash; Arsenic</label>
+            <div class="ctl"><input id="D_NEXT" type="number" step="1e18" value="5e19"></div>
+          </div>
+          <div class="field compact">
+            <label for="D_NSD">nMOS S/D &mdash; Arsenic</label>
+            <div class="ctl"><input id="D_NSD" type="number" step="1e18" value="1e20"></div>
+          </div>
+          <div class="field compact">
+            <label for="D_PCHAN">pMOS channel &mdash; Phosphorus</label>
+            <div class="ctl"><input id="D_PCHAN" type="number" step="1e16" value="3e17"></div>
+          </div>
+          <div class="field compact">
+            <label for="D_PEXT">pMOS extension &mdash; Boron</label>
+            <div class="ctl"><input id="D_PEXT" type="number" step="1e18" value="5e19"></div>
+          </div>
+          <div class="field compact">
+            <label for="D_PSD">pMOS S/D &mdash; Boron</label>
+            <div class="ctl"><input id="D_PSD" type="number" step="1e18" value="1e20"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ---------- actions ---------- -->
     <div class="card">
       <div class="section-body actions">
@@ -303,6 +363,19 @@
           <table class="kv"><tbody id="summary-body">
             <tr><td colspan="2" class="dim">-</td></tr>
           </tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- structure analysis ---------- -->
+    <div class="card" id="analysis-card">
+      <div class="section-head">
+        <h2>Structure analysis <span id="analysis-sub" class="dim"></span></h2>
+        <span class="chev"></span>
+      </div>
+      <div class="section-body">
+        <div id="analysis-body">
+          <p class="note">Generate or import a structure to measure it.</p>
         </div>
       </div>
     </div>
@@ -452,6 +525,7 @@
 
 <script src="js/preview.js"></script>
 <script src="js/sde-parser.js"></script>
+<script src="js/analyze.js"></script>
 <script src="js/generator.js"></script>
 </body>
 </html>

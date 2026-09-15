@@ -16,7 +16,9 @@ Generation options. All three describe the same device.
 
 It also **reads** SDE: open an `.scm` file, paste commands, or drag a file onto
 the page. The input is recognised by its content, so a saved file and a pasted
-fragment take the same path.
+fragment take the same path. A loaded structure is then measured - architecture,
+gate, stack, junctions, doping, contacts, mesh - and checked for overlaps, gaps,
+disconnected regions and contacts that land on nothing.
 
 No Python, no Flask, no backend, no Node.js, no npm and no build step.
 Everything runs in the browser.
@@ -43,6 +45,35 @@ Everything runs in the browser.
 - Three output formats: step-by-step commands (default), the V8 helper
   procedures, or those procedures with their comments
 - Download the `.scm`, or copy it to the clipboard
+
+**Structure analysis**
+
+- Every loaded or generated structure is measured and reported: architecture,
+  gate length and position, channel count, thickness, width and pitch, source
+  and drain dimensions, extension lengths, junction planes, spacer and collar
+  thicknesses, fork wall dimensions, substrate and well depths, doping per
+  region, material assignments, contact pick points and mesh refinements
+- Around 100 measured values for the default structure, each recording which
+  regions it was measured from
+- Architecture is inferred from geometry, not from names or the file
+  extension, so it works on files this app did not generate
+- A consistency check runs before every generation and reports overlaps,
+  empty gaps, disconnected regions, invalid contacts and degenerate boxes.
+  Errors block the download; nothing inconsistent can be saved
+
+**Editable parameters**
+
+- Primary geometry: `T_NS`, `W_NS`, `T_FORK`, `N_SHEETS`
+- Twelve design constants: pad length, spacer, gate length, collar, gate
+  metal, liner, bridge, substrate and well depths, three mesh minimums
+- Nine doping concentrations, one per profile
+- `N_SHEETS` rebuilds the whole stack: sheet bands, inter-gate metal bands,
+  collar slabs, spacer pieces and doping placements all follow. Verified from
+  1 to 8 sheets, every one geometrically consistent
+- Changing any parameter recomputes every dependent coordinate, so source,
+  channel and drain stay connected, the collar stays closed, spacers stay
+  against the gate and contacts stay on their regions - these are checked,
+  not assumed
 
 **Input**
 
@@ -111,6 +142,7 @@ project/
 └── js/
     ├── generator.js    compute, validate, buildScm, buildFlatScm, import, layout
     ├── sde-parser.js   reader and evaluator for SDE text; window.SDE
+    ├── analyze.js      parameter extraction + consistency check; window.SDEAnalyze
     └── preview.js      Three.js scene, picking, cameras
 ```
 
@@ -181,6 +213,7 @@ without change in behaviour:
 | (n/a - browser-only) | `buildFlatScm()` step-by-step emitter |
 | (n/a - browser-only) | `stripScmComments()`, `emitScm()` |
 | (n/a - browser-only) | `window.SDE.parse()` / `.detect()` / `.format()` |
+| (n/a - browser-only) | `window.SDEAnalyze.analyze()` / `.check()` |
 | `case_name(...)` | `caseName(...)` |
 | `n(v)` number formatter | `n(v)` |
 | `SWEEP_MODE` one_at_a_time / full_grid | Mode dropdown |
@@ -217,6 +250,34 @@ balanced, every line is a complete command, and no `;` survives in the
 comment-free formats, including when a custom mesh prefix contains one.
 
 Sweep case counts: 8 for one-at-a-time, 27 for the full grid.
+
+The analyser is checked the same way, against a structure whose inputs are
+known: it must measure back exactly what the generator was given. Sheet
+thickness, width, pitch, gate length, spacer, collar, liner, substrate and
+well depths, fork wall thickness, sheet count and column count all match.
+
+The consistency checker is checked in both directions - it must stay silent
+on a valid structure and must not. An early pairwise version reported 13
+"gaps" in a perfectly good device, because in a gate-all-around stack the
+channel sits a collar-thickness from the gate metal by design and that space
+is filled by the collar. It now samples the volume between two regions and
+only reports a gap if that volume is empty. On a deliberately broken
+structure it still detects the overlap, the island, the sub-nanometre gap
+and the contact that lands on nothing.
+
+| sheets | regions | doping placements | inter-gate bands | consistency |
+|---|---|---|---|---|
+| 1 | 48 | 13 | 0 | clean |
+| 2 | 68 | 19 | 1 | clean |
+| 3 | 88 | 25 | 2 | clean |
+| 4 | 108 | 31 | 3 | clean |
+| 6 | 148 | 43 | 5 | clean |
+| 8 | 188 | 55 | 7 | clean |
+
+A note on scope: SDE geometry files do not carry a work function. A contact
+set stores a name, a colour and a display line width; the work function is a
+device property and belongs in `sdevice.cmd`. The analyser says so rather
+than inventing a value.
 
 Output from this generator was loaded into the SCM Device Viewer and passed
 all eleven geometry checks: 88 regions, 5 materials, 7 contacts, no overlaps,
