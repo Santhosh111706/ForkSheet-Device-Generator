@@ -375,6 +375,18 @@ body.resizing iframe { pointer-events: none; }
   cursor: pointer;
   margin-bottom: 0;
 }
+/* one sweep variable: a tick to include it, then its value list */
+.sweep-row {
+  display: grid;
+  grid-template-columns: minmax(96px, auto) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 7px;
+}
+.sweep-row .chk-field { font-family: var(--mono); font-size: 11.5px; }
+.sweep-row input[type="text"] { min-width: 0; }
+.sweep-row:has(input[type="checkbox"]:not(:checked)) input[type="text"] { opacity: .45; }
+
 .chk-field input[type="checkbox"] {
   flex: 0 0 auto;
   width: 15px;

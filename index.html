@@ -119,46 +119,64 @@
       <div class="section-head"><h2>Study parameters</h2><span class="chev"></span></div>
       <div class="section-body">
         <p class="note">
-          The primary geometry parameters. All lengths are in micrometres
-          (1&nbsp;nm = 0.001&nbsp;&micro;m). Every other coordinate in the
-          structure is recomputed from these, and from the design constants
-          and doping below.
+          The six primary geometry variables of the self-heating study. All
+          lengths are in micrometres (1&nbsp;nm = 0.001&nbsp;&micro;m). Every
+          other coordinate in the structure is recomputed from these and from
+          the design constants below.
         </p>
 
         <div class="field">
-          <label for="T_NS">T_NS &mdash; nanosheet thickness</label>
+          <label for="T_NS">1 &middot; T_NS &mdash; nanosheet thickness</label>
           <div class="ctl">
             <input id="T_NS" type="number" step="0.001" min="0.002" value="0.006">
             <span class="unit">&micro;m</span>
           </div>
-          <small>Vertical (Y) extent of each sheet. Drives sheet pitch, gate bands and device height.</small>
+          <small>Vertical (Y) extent of each sheet. Sets the sheet pitch, the gate bands and the device height &mdash; the dominant term in the thermal path out of the channel.</small>
         </div>
 
         <div class="field">
-          <label for="W_NS">W_NS &mdash; nanosheet width</label>
+          <label for="W_NS">2 &middot; W_NS &mdash; nanosheet width</label>
           <div class="ctl">
             <input id="W_NS" type="number" step="0.001" min="0.005" value="0.030">
             <span class="unit">&micro;m</span>
           </div>
-          <small>Transverse (Z) extent of each sheet. Drives the HfO<sub>2</sub> collars, gate bridges and the pMOS offset.</small>
+          <small>Transverse (Z) extent of each sheet. Drives the HfO<sub>2</sub> collars, the gate bridges and the pMOS offset.</small>
         </div>
 
         <div class="field">
-          <label for="N_SHEETS">N_SHEETS &mdash; number of stacked channels</label>
+          <label for="L_G">3 &middot; L_G &mdash; gate length</label>
+          <div class="ctl">
+            <input id="L_G" type="number" step="0.001" min="0.004" value="0.020">
+            <span class="unit">&micro;m</span>
+          </div>
+          <small>Gated length in X. Sets the channel segment, the gate metal and both junction planes.</small>
+        </div>
+
+        <div class="field">
+          <label for="T_SPACER">4 &middot; T_SPACER &mdash; spacer thickness</label>
+          <div class="ctl">
+            <input id="T_SPACER" type="number" step="0.001" min="0.001" value="0.005">
+            <span class="unit">&micro;m</span>
+          </div>
+          <small>Si<sub>3</sub>N<sub>4</sub> between gate and pad, each side. Also the source-to-gate and drain-to-gate distance, and a poor thermal conductor in the escape path.</small>
+        </div>
+
+        <div class="field">
+          <label for="L_PAD">5 &middot; L_PAD &mdash; source/drain length</label>
+          <div class="ctl">
+            <input id="L_PAD" type="number" step="0.001" min="0.005" value="0.025">
+            <span class="unit">&micro;m</span>
+          </div>
+          <small>Length of each source and drain pad in X. The pad height and width are not independent: they follow the sheet stack and the gate envelope.</small>
+        </div>
+
+        <div class="field">
+          <label for="N_SHEETS">6 &middot; N_NS &mdash; number of nanosheets</label>
           <div class="ctl">
             <input id="N_SHEETS" type="number" step="1" min="1" max="12" value="3">
             <span class="unit">sheets</span>
           </div>
           <small>Sheets per transistor. Every dependent band, spacer piece, collar and doping placement is rebuilt from this. The structured V8 formats are written for 3; other counts emit step-by-step.</small>
-        </div>
-
-        <div class="field">
-          <label for="T_FORK">T_FORK &mdash; fork wall thickness</label>
-          <div class="ctl">
-            <input id="T_FORK" type="number" step="0.001" min="0.002" value="0.008">
-            <span class="unit">&micro;m</span>
-          </div>
-          <small>Si<sub>3</sub>N<sub>4</sub> wall between nMOS and pMOS. Sets the device separation and the well split plane.</small>
         </div>
       </div>
     </div>
@@ -181,19 +199,71 @@
         </div>
 
         <div id="sweep-fields">
-          <div class="field">
-            <label for="sweep-T_NS">T_NS values</label>
-            <div class="ctl"><input id="sweep-T_NS" type="text" value="0.004, 0.005, 0.006"></div>
-            <small>comma separated</small>
+          <p class="note">
+            Tick the variables to sweep and give each a comma-separated list.
+            Unticked parameters hold the value set above. A full grid is the
+            product of every ticked list, so it grows quickly &mdash; the case
+            count below is live.
+          </p>
+
+          <div class="sweep-row">
+            <label class="chk-field" title="nanosheet thickness">
+              <input type="checkbox" id="sweep-on-T_NS" checked>
+              <span>T_NS</span>
+            </label>
+            <input id="sweep-T_NS" type="text" spellcheck="false"
+                   aria-label="T_NS sweep values">
           </div>
-          <div class="field">
-            <label for="sweep-W_NS">W_NS values</label>
-            <div class="ctl"><input id="sweep-W_NS" type="text" value="0.015, 0.020, 0.025"></div>
+          <div class="sweep-row">
+            <label class="chk-field" title="nanosheet width">
+              <input type="checkbox" id="sweep-on-W_NS" checked>
+              <span>W_NS</span>
+            </label>
+            <input id="sweep-W_NS" type="text" spellcheck="false"
+                   aria-label="W_NS sweep values">
           </div>
-          <div class="field">
-            <label for="sweep-T_FORK">T_FORK values</label>
-            <div class="ctl"><input id="sweep-T_FORK" type="text" value="0.006, 0.008, 0.010"></div>
+          <div class="sweep-row">
+            <label class="chk-field" title="gate length">
+              <input type="checkbox" id="sweep-on-L_G" checked>
+              <span>L_G</span>
+            </label>
+            <input id="sweep-L_G" type="text" spellcheck="false"
+                   aria-label="L_G sweep values">
           </div>
+          <div class="sweep-row">
+            <label class="chk-field" title="spacer thickness">
+              <input type="checkbox" id="sweep-on-T_SPACER" checked>
+              <span>T_SPACER</span>
+            </label>
+            <input id="sweep-T_SPACER" type="text" spellcheck="false"
+                   aria-label="T_SPACER sweep values">
+          </div>
+          <div class="sweep-row">
+            <label class="chk-field" title="source/drain length">
+              <input type="checkbox" id="sweep-on-L_PAD" checked>
+              <span>L_PAD</span>
+            </label>
+            <input id="sweep-L_PAD" type="text" spellcheck="false"
+                   aria-label="L_PAD sweep values">
+          </div>
+          <div class="sweep-row">
+            <label class="chk-field" title="number of nanosheets">
+              <input type="checkbox" id="sweep-on-N_SHEETS" checked>
+              <span>N_NS</span>
+            </label>
+            <input id="sweep-N_SHEETS" type="text" spellcheck="false"
+                   aria-label="N_NS sweep values">
+          </div>
+          <div class="sweep-row">
+            <label class="chk-field" title="fork wall thickness">
+              <input type="checkbox" id="sweep-on-T_FORK">
+              <span>T_FORK</span>
+            </label>
+            <input id="sweep-T_FORK" type="text" spellcheck="false"
+                   aria-label="T_FORK sweep values">
+          </div>
+
+          <div id="sweep-count" class="import-status">No cases.</div>
         </div>
 
         <div class="field">
@@ -239,16 +309,8 @@
 
         <div class="grid2">
           <div class="field compact">
-            <label for="L_PAD">L_PAD &mdash; source/drain pad length</label>
-            <div class="ctl"><input id="L_PAD" type="number" step="0.001" value="0.025"><span class="unit">&micro;m</span></div>
-          </div>
-          <div class="field compact">
-            <label for="T_SPACER">T_SPACER &mdash; spacer thickness</label>
-            <div class="ctl"><input id="T_SPACER" type="number" step="0.001" value="0.005"><span class="unit">&micro;m</span></div>
-          </div>
-          <div class="field compact">
-            <label for="L_G">L_G &mdash; gate length</label>
-            <div class="ctl"><input id="L_G" type="number" step="0.001" value="0.020"><span class="unit">&micro;m</span></div>
+            <label for="T_FORK">T_FORK &mdash; fork wall thickness</label>
+            <div class="ctl"><input id="T_FORK" type="number" step="0.001" min="0.002" value="0.008"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="T_HFO2">T_HFO2 &mdash; HfO<sub>2</sub> collar</label>

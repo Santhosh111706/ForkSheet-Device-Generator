@@ -74,10 +74,27 @@ const DEFAULT_DOPING = {
 };
 
 /* Default sweep lists, matching T_NS_VALUES / W_NS_VALUES / T_FORK_VALUES. */
+/* The six primary self-heating study variables, plus T_FORK, which is not
+   one of the six but is architecture-defining for a forksheet and was
+   sweepable before - so it stays available, just unticked by default. */
+const SWEEP_VARS = ['T_NS', 'W_NS', 'L_G', 'T_SPACER', 'L_PAD', 'N_SHEETS', 'T_FORK'];
+
 const DEFAULT_SWEEP = {
-  T_NS:   '0.004, 0.005, 0.006',
-  W_NS:   '0.015, 0.020, 0.025',
-  T_FORK: '0.006, 0.008, 0.010',
+  T_NS:     '0.004, 0.005, 0.006',
+  W_NS:     '0.015, 0.020, 0.025',
+  L_G:      '0.014, 0.020, 0.026',
+  T_SPACER: '0.004, 0.005, 0.007',
+  L_PAD:    '0.020, 0.025, 0.030',
+  N_SHEETS: '2, 3, 4',
+  T_FORK:   '0.006, 0.008, 0.010',
+};
+
+/* Which are ticked when the page loads. The six study variables are the
+   point of the exercise, but all six on a full grid is 3^6 = 729 cases, so
+   the default lands on one-at-a-time and the case count is always shown. */
+const DEFAULT_SWEEP_ON = {
+  T_NS: true, W_NS: true, L_G: true,
+  T_SPACER: true, L_PAD: true, N_SHEETS: true, T_FORK: false,
 };
 
 const EPS = 1e-12;
@@ -1386,6 +1403,28 @@ function caseName(t_ns, w_ns, t_fork) {
   return `fork_TNS_${t_ns.toFixed(3)}_WNS_${w_ns.toFixed(3)}_TFORK_${t_fork.toFixed(3)}`;
 }
 
+/* How each extra variable appears in a filename. */
+const NAME_TAG = { L_G: 'LG', T_SPACER: 'TSP', L_PAD: 'LPAD', N_SHEETS: 'NNS' };
+
+/**
+ * Name a sweep case so two cases can never collide.
+ *
+ * The legacy three-parameter name is always the stem, so a sweep over
+ * T_NS/W_NS/T_FORK produces exactly the filenames it always did. Any other
+ * variable that VARIES in this sweep is appended. Without that, a sweep
+ * over gate length would write every case to the same filename and quietly
+ * download one file several times.
+ */
+function caseNameFor(v, extraKeys) {
+  let stem = caseName(v.T_NS, v.W_NS, v.T_FORK);
+  for (const k of (extraKeys || [])) {
+    if (k === 'T_NS' || k === 'W_NS' || k === 'T_FORK') continue;
+    const tag = NAME_TAG[k] || k;
+    stem += `_${tag}_${k === 'N_SHEETS' ? v[k] : Number(v[k]).toFixed(3)}`;
+  }
+  return stem;
+}
+
 function downloadText(filename, text) {
   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
   const a = document.createElement('a');
@@ -1609,45 +1648,129 @@ function doDownload() {
   doSweep();
 }
 
-/** Port of run_sweep(): one_at_a_time and full_grid. */
-function doSweep() {
-  const C = readConstants();
-  const p = readParams();
-  const parseList = (id) => $(id).value.split(',')
-    .map((s) => parseFloat(s.trim()))
-    .filter((v) => !Number.isNaN(v));
+/**
+ * Build the case list for the current sweep settings.
+ *
+ * Generalised from the original three fixed lists to any subset of
+ * SWEEP_VARS, because the study has six primary variables and gate length,
+ * spacer thickness and source/drain length were previously not sweepable
+ * at all. Returns the cases and the keys that actually vary, which is what
+ * the file naming needs to stay collision-free.
+ */
+function sweepCases() {
+  const base = Object.assign({}, readParams(), readConstants());
+  const parseList = (id) => {
+    const el = $(id);
+    if (!el) return [];
+    return el.value.split(',').map((x) => parseFloat(x.trim()))
+      .filter((v) => Number.isFinite(v));
+  };
 
-  const tv = parseList('#sweep-T_NS');
-  const wv = parseList('#sweep-W_NS');
-  const fv = parseList('#sweep-T_FORK');
-  const mode = $('#gen-mode').value;
-
-  let cases = [];
-  if (mode === 'full_grid') {
-    for (const t of tv) for (const w of wv) for (const f of fv) cases.push([t, w, f]);
-  } else {
-    for (const v of tv) cases.push([v, p.W_NS, p.T_FORK]);
-    for (const v of wv) cases.push([p.T_NS, v, p.T_FORK]);
-    for (const v of fv) cases.push([p.T_NS, p.W_NS, v]);
-    const seen = new Set();
-    cases = cases.filter((c) => {
-      const k = c.join('|');
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
+  const active = [];
+  for (const k of SWEEP_VARS) {
+    const on = $(`#sweep-on-${k}`);
+    if (!on || !on.checked) continue;
+    const vals = parseList(`#sweep-${k}`);
+    if (vals.length) active.push([k, vals]);
   }
 
+  const mode = $('#gen-mode').value;
+  let cases = [];
+
+  if (!active.length) return { cases, active: [], varying: [], mode };
+
+  if (mode === 'full_grid') {
+    cases = [Object.assign({}, base)];
+    for (const [k, vals] of active) {
+      const next = [];
+      for (const c of cases) {
+        for (const v of vals) next.push(Object.assign({}, c, { [k]: v }));
+      }
+      cases = next;
+    }
+  } else {
+    // one at a time: vary each in turn, holding the rest at their control value
+    for (const [k, vals] of active) {
+      for (const v of vals) cases.push(Object.assign({}, base, { [k]: v }));
+    }
+  }
+
+  // drop duplicates, which one-at-a-time produces whenever a list contains
+  // the value already in the control
+  const seen = new Set();
+  cases = cases.filter((c) => {
+    const key = SWEEP_VARS.map((k) => c[k]).join('|');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  // a key only needs to appear in the filename if it actually changes
+  const varying = SWEEP_VARS.filter((k) =>
+    new Set(cases.map((c) => c[k])).size > 1);
+
+  return { cases, active: active.map(([k]) => k), varying, mode };
+}
+
+/** Live case count under the sweep lists, so a grid cannot surprise anyone. */
+function updateSweepCount() {
+  const box = $('#sweep-count');
+  if (!box) return;
+  if ($('#gen-mode').value === 'single') { box.textContent = 'Single case.'; box.className = 'import-status'; return; }
+
+  const { cases, active, mode } = sweepCases();
   if (!cases.length) {
-    setStatus('error', 'Sweep has no cases', ['enter at least one value in a sweep list']);
+    box.className = 'import-status error';
+    box.innerHTML = '<strong>No cases.</strong> Tick at least one variable and give it values.';
+    return;
+  }
+  const names = active.join(', ');
+  const kind = mode === 'full_grid' ? 'full grid' : 'one at a time';
+  if (cases.length > SWEEP_HARD_CAP) {
+    box.className = 'import-status error';
+    box.innerHTML = `<strong>${cases.length} cases</strong> (${kind} over ${names}). ` +
+      `That is beyond the ${SWEEP_HARD_CAP}-file limit &mdash; browsers cannot be asked ` +
+      `to save that many. Use fewer values, fewer variables, or one at a time.`;
+  } else if (cases.length > SWEEP_WARN_AT) {
+    box.className = 'import-status warn';
+    box.innerHTML = `<strong>${cases.length} cases</strong> (${kind} over ${names}). ` +
+      `That is ${cases.length} separate downloads.`;
+  } else {
+    box.className = 'import-status ok';
+    box.innerHTML = `<strong>${cases.length} case${cases.length > 1 ? 's' : ''}</strong> ` +
+      `(${kind} over ${names}).`;
+  }
+}
+
+const SWEEP_WARN_AT = 40;
+const SWEEP_HARD_CAP = 300;
+
+/** Port of run_sweep(): one_at_a_time and full_grid, over any variables. */
+function doSweep() {
+  const { cases, varying, mode } = sweepCases();
+
+  if (!cases.length) {
+    setStatus('error', 'Sweep has no cases',
+      ['tick at least one variable and give it a comma-separated list']);
+    return;
+  }
+  if (cases.length > SWEEP_HARD_CAP) {
+    setStatus('error', `${cases.length} cases is too many to download`,
+      [`the limit is ${SWEEP_HARD_CAP} files`,
+       'reduce the value lists, untick a variable, or switch to one at a time']);
     return;
   }
 
   const written = [], rejected = [];
   const files = [];
-  for (const [t, w, f] of cases) {
-    const res = validate(t, w, f, C);
-    const stem = caseName(t, w, f);
+  for (const c of cases) {
+    // each case overrides only its own variables; everything else holds
+    const C = Object.assign({}, readConstants());
+    for (const k of SWEEP_VARS) {
+      if (k !== 'T_NS' && k !== 'W_NS' && k !== 'T_FORK') C[k] = c[k];
+    }
+    const res = validate(c.T_NS, c.W_NS, c.T_FORK, C);
+    const stem = caseNameFor(c, varying);
     if (res.errs.length) {
       rejected.push(`${stem}: ${res.errs[0]}`);
       continue;
@@ -1667,8 +1790,12 @@ function doSweep() {
   });
 
   setStatus(rejected.length ? 'warn' : 'ok',
-    `Sweep: ${files.length} file(s) downloading, ${rejected.length} rejected`,
-    written.map((s) => 'OK  ' + s).concat(rejected.map((s) => 'REJECTED  ' + s)));
+    `Sweep (${mode === 'full_grid' ? 'full grid' : 'one at a time'}): ` +
+    `${files.length} file(s) downloading, ${rejected.length} rejected`,
+    [`varying: ${varying.join(', ') || 'nothing'}`]
+      .concat(written.slice(0, 12).map((x) => 'OK  ' + x))
+      .concat(written.length > 12 ? [`...and ${written.length - 12} more`] : [])
+      .concat(rejected.map((x) => 'REJECTED  ' + x)));
 }
 
 function doReset() {
@@ -1687,9 +1814,12 @@ function doReset() {
     // it as 100000000000000000, which nobody can read or edit
     if (el) el.value = conc(v);
   }
-  $('#sweep-T_NS').value   = DEFAULT_SWEEP.T_NS;
-  $('#sweep-W_NS').value   = DEFAULT_SWEEP.W_NS;
-  $('#sweep-T_FORK').value = DEFAULT_SWEEP.T_FORK;
+  for (const k of SWEEP_VARS) {
+    const list = document.getElementById('sweep-' + k);
+    if (list) list.value = DEFAULT_SWEEP[k];
+    const tick = document.getElementById('sweep-on-' + k);
+    if (tick) tick.checked = !!DEFAULT_SWEEP_ON[k];
+  }
   $('#gen-mode').value = 'single';
   $('#mesh-prefix-mode').value = 'auto';
   $('#mesh-prefix-custom').value = 'fork1108';
@@ -1707,6 +1837,7 @@ function doReset() {
 function onModeChange() {
   const single = $('#gen-mode').value === 'single';
   $('#sweep-fields').style.display = single ? 'none' : '';
+  updateSweepCount();
   $('#btn-download').textContent = single ? 'Download .scm' : 'Download all cases';
   const top = $('#btn-download-top');
   if (top) {
@@ -1732,9 +1863,12 @@ function initGenerator() {
     // it as 100000000000000000, which nobody can read or edit
     if (el) el.value = conc(v);
   }
-  $('#sweep-T_NS').value   = DEFAULT_SWEEP.T_NS;
-  $('#sweep-W_NS').value   = DEFAULT_SWEEP.W_NS;
-  $('#sweep-T_FORK').value = DEFAULT_SWEEP.T_FORK;
+  for (const k of SWEEP_VARS) {
+    const list = document.getElementById('sweep-' + k);
+    if (list) list.value = DEFAULT_SWEEP[k];
+    const tick = document.getElementById('sweep-on-' + k);
+    if (tick) tick.checked = !!DEFAULT_SWEEP_ON[k];
+  }
 
   // live preview on any parameter change
   $$('#controls input[type="number"]').forEach((el) => {
@@ -1757,6 +1891,17 @@ function initGenerator() {
     if (app.lastScm) doGenerate();
   });
   $('#gen-mode').addEventListener('change', onModeChange);
+
+  // every sweep control refreshes the case count, so a full grid can never
+  // surprise anyone with 729 downloads
+  for (const k of SWEEP_VARS) {
+    const list = document.getElementById('sweep-' + k);
+    const tick = document.getElementById('sweep-on-' + k);
+    if (list) list.addEventListener('input', updateSweepCount);
+    if (tick) tick.addEventListener('change', updateSweepCount);
+  }
+  $$('#controls input[type="number"]').forEach((el) =>
+    el.addEventListener('input', updateSweepCount));
 
   // The two header buttons mirror the sidebar ones, so the primary actions
   // stay reachable when the parameters panel is closed or off-canvas.

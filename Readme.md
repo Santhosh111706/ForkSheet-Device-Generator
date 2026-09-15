@@ -29,7 +29,10 @@ Everything runs in the browser.
 
 **Generator**
 
-- All three study parameters: `T_NS`, `W_NS`, `T_FORK`
+- The six primary self-heating study variables, all sweepable:
+  `T_NS` (nanosheet thickness), `W_NS` (nanosheet width), `L_G` (gate
+  length), `T_SPACER` (spacer thickness), `L_PAD` (source/drain length)
+  and `N_SHEETS` (number of nanosheets)
 - All nine fixed design constants exposed under Advanced:
   `L_PAD`, `T_SPACER`, `L_G`, `T_HFO2`, `T_METAL`, `T_LINER`, `T_BRIDGE`,
   `T_SUB`, `T_WELL`, plus the three mesh minimums
@@ -41,6 +44,8 @@ Everything runs in the browser.
   interference, nMOS/pMOS isolation, contact placement)
 - Three generation modes: single case, sweep one parameter at a time,
   and full grid, matching the Python `SWEEP_MODE` options
+- Any subset of seven variables can be swept - the six above plus
+  `T_FORK` - each with its own value list, with a live case count
 - Mesh prefix `auto` or a fixed custom name
 - Three output formats: step-by-step commands (default), the V8 helper
   procedures, or those procedures with their comments
@@ -80,9 +85,10 @@ Everything runs in the browser.
 
 **Editable parameters**
 
-- Primary geometry: `T_NS`, `W_NS`, `T_FORK`, `N_SHEETS`
-- Twelve design constants: pad length, spacer, gate length, collar, gate
-  metal, liner, bridge, substrate and well depths, three mesh minimums
+- The six study variables: `T_NS`, `W_NS`, `L_G`, `T_SPACER`, `L_PAD`,
+  `N_SHEETS`
+- Design constants: `T_FORK`, collar, gate metal, liner, bridge, substrate
+  and well depths, three mesh minimums
 - Nine doping concentrations, one per profile
 - `N_SHEETS` rebuilds the whole stack: sheet bands, inter-gate metal bands,
   collar slabs, spacer pieces and doping placements all follow. Verified from
@@ -223,15 +229,16 @@ sub-path alike.
 
 ## How to use it
 
-1. Set **T_NS**, **W_NS** and **T_FORK**. The preview updates as you type.
+1. Set the six study parameters. The preview updates as you type.
 2. The status panel reports validity. Errors block generation and say exactly
    what is wrong; warnings let generation proceed.
 3. Press **Generate** to produce the SCM text and show it at the bottom.
 4. Press **Download .scm** to save it. The filename follows the Python
    convention: `fork_TNS_0.006_WNS_0.030_TFORK_0.008.scm`.
-5. For a sweep, change **Mode**, enter comma-separated value lists, and press
-   **Download all cases**. Files download one after another with a short gap,
-   since browsers throttle rapid successive downloads.
+5. For a sweep, change **Mode**, tick the variables to vary, give each a
+   comma-separated list, and press **Download all cases**. The case count
+   updates live. Files download one after another with a short gap, since
+   browsers throttle rapid successive downloads.
 6. Change **Output format** if you want one of the structured forms rather
    than the default step-by-step script.
 7. Press **Reset** to restore every default.
@@ -294,7 +301,27 @@ step-by-step regions against `regionList()` directly. Parentheses stay
 balanced, every line is a complete command, and no `;` survives in the
 comment-free formats, including when a custom mesh prefix contains one.
 
-Sweep case counts: 8 for one-at-a-time, 27 for the full grid.
+**Sweep case counts.** The original three-variable sweep is unchanged: 8
+for one-at-a-time, 27 for the full grid over `T_NS`, `W_NS` and `T_FORK`.
+With the six study variables ticked, one-at-a-time gives 14 cases (18 list
+entries minus the 4 that repeat the control value). A full grid over all
+six would be 3^6 = 729 separate downloads, so the case count is shown live
+and anything past 300 is refused with an explanation rather than attempted.
+
+**File naming.** A sweep over a variable that is not in the legacy name
+would otherwise write every case to the same filename and silently save
+one file several times. The legacy stem is kept, and any variable that
+actually varies in that sweep is appended:
+
+```
+fork_TNS_0.006_WNS_0.030_TFORK_0.008_LG_0.014.scm
+fork_TNS_0.006_WNS_0.030_TFORK_0.008_LG_0.020.scm
+fork_TNS_0.006_WNS_0.030_TFORK_0.008_TSP_0.004_NNS_2.scm
+```
+
+A sweep over only `T_NS`, `W_NS` and `T_FORK` produces exactly the
+filenames it always did. The mesh prefix follows the filename, so each
+case writes its own `_msh.tdr`.
 
 The analyser is checked the same way, against a structure whose inputs are
 known: it must measure back exactly what the generator was given. Sheet
