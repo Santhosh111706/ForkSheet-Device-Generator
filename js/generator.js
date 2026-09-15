@@ -1066,58 +1066,66 @@ function buildScm(G, meshPrefix, C) {
    bounds. A change here that moved anything would fail that comparison.
    ========================================================================== */
 
-/** `(sdegeo:create-cuboid (position ...) (position ...) "Mat" "Name")` */
+/**
+ * `(sdegeo:create-cuboid (position ...) (position ...) "Mat" "Name")`
+ *
+ * Coordinates are literal numbers. An earlier version emitted the symbol
+ * names and a block of (define ...) lines above them, which is how the V8
+ * template is written - but a define block is a program, not a script you
+ * could have typed. The structured formats still carry it; this one does
+ * not, so every line stands on its own.
+ */
 function cuboid(name, material, ax, bx, ay, by, az, bz) {
-  return `(sdegeo:create-cuboid (position ${ax} ${ay} ${az}) ` +
-         `(position ${bx} ${by} ${bz}) "${material}" "${name}")`;
+  return `(sdegeo:create-cuboid (position ${n(ax)} ${n(ay)} ${n(az)}) ` +
+         `(position ${n(bx)} ${n(by)} ${n(bz)}) "${material}" "${name}")`;
 }
 
 /** Every create-cuboid for one transistor, expanded, in build order. */
-function flatDevice(tag, zga, zha, zca, zcb, zhb, zgb, G) {
+function flatDevice(tag, zga, zha, zca, zcb, zhb, zgb, G, C) {
   const L = [];
   const N = G.sheets.length;
-  const sheets = G.sheets.map((_, i) => [String(i + 1), 'ya' + (i + 1), 'yb' + (i + 1)]);
-  const topB = 'yb' + N;
+  const sheets = G.sheets.map((sh, i) => [String(i + 1), sh.a, sh.b]);
+  const topB = G.sheets[N - 1].b;
 
-  L.push(cuboid(`${tag}_GateLiner`, 'SiO2',    'xg0', 'xg1', 'yl0', 'yl1', zga, zgb));
-  L.push(cuboid(`${tag}_Source`,    'Silicon', 'x0',  'x1',  'y_sd0', 'y_sd1', zga, zgb));
-  L.push(cuboid(`${tag}_Drain`,     'Silicon', 'x2',  'x3',  'y_sd0', 'y_sd1', zga, zgb));
+  L.push(cuboid(`${tag}_GateLiner`, 'SiO2',    G.xg0, G.xg1, G.yl0, G.yl1, zga, zgb));
+  L.push(cuboid(`${tag}_Source`,    'Silicon', G.x0,  G.x1,  G.y_sd0, G.y_sd1, zga, zgb));
+  L.push(cuboid(`${tag}_Drain`,     'Silicon', G.x2,  G.x3,  G.y_sd0, G.y_sd1, zga, zgb));
   L.push('');
 
   for (const [st, a, b] of sheets) {
-    L.push(cuboid(`${tag}_Sheet${st}_extS`, 'Silicon', 'x1',  'xg0', a, b, zca, zcb));
-    L.push(cuboid(`${tag}_Sheet${st}_chan`, 'Silicon', 'xg0', 'xg1', a, b, zca, zcb));
-    L.push(cuboid(`${tag}_Sheet${st}_extD`, 'Silicon', 'xg1', 'x2',  a, b, zca, zcb));
+    L.push(cuboid(`${tag}_Sheet${st}_extS`, 'Silicon', G.x1,  G.xg0, a, b, zca, zcb));
+    L.push(cuboid(`${tag}_Sheet${st}_chan`, 'Silicon', G.xg0, G.xg1, a, b, zca, zcb));
+    L.push(cuboid(`${tag}_Sheet${st}_extD`, 'Silicon', G.xg1, G.x2,  a, b, zca, zcb));
   }
   L.push('');
 
   for (const [st, a, b] of sheets) {
-    L.push(cuboid(`${tag}_HfO2_s${st}_bot`, 'HfO2', 'xg0', 'xg1', `(- ${a} t_hfo2)`, a, zha, zhb));
-    L.push(cuboid(`${tag}_HfO2_s${st}_top`, 'HfO2', 'xg0', 'xg1', b, `(+ ${b} t_hfo2)`, zha, zhb));
-    L.push(cuboid(`${tag}_HfO2_s${st}_zlo`, 'HfO2', 'xg0', 'xg1', a, b, zha, zca));
-    L.push(cuboid(`${tag}_HfO2_s${st}_zhi`, 'HfO2', 'xg0', 'xg1', a, b, zcb, zhb));
+    L.push(cuboid(`${tag}_HfO2_s${st}_bot`, 'HfO2', G.xg0, G.xg1, a - C.T_HFO2, a, zha, zhb));
+    L.push(cuboid(`${tag}_HfO2_s${st}_top`, 'HfO2', G.xg0, G.xg1, b, b + C.T_HFO2, zha, zhb));
+    L.push(cuboid(`${tag}_HfO2_s${st}_zlo`, 'HfO2', G.xg0, G.xg1, a, b, zha, zca));
+    L.push(cuboid(`${tag}_HfO2_s${st}_zhi`, 'HfO2', G.xg0, G.xg1, a, b, zcb, zhb));
   }
   L.push('');
 
-  L.push(cuboid(`${tag}_gate_bottom`,   'TiN', 'xg0', 'xg1', 'ygb0',   'ygb1',   zga, zgb));
-  L.push(cuboid(`${tag}_gate_bridge_L`, 'TiN', 'xg0', 'xg1', 'ybr0',   'ybr1',   zga, zha));
-  L.push(cuboid(`${tag}_gate_bridge_R`, 'TiN', 'xg0', 'xg1', 'ybr0',   'ybr1',   zhb, zgb));
+  L.push(cuboid(`${tag}_gate_bottom`,   'TiN', G.xg0, G.xg1, G.ygb0,   G.ygb1,   zga, zgb));
+  L.push(cuboid(`${tag}_gate_bridge_L`, 'TiN', G.xg0, G.xg1, G.ybr0,   G.ybr1,   zga, zha));
+  L.push(cuboid(`${tag}_gate_bridge_R`, 'TiN', G.xg0, G.xg1, G.ybr0,   G.ybr1,   zhb, zgb));
   for (const band of G.inter) {
-    L.push(cuboid(`${tag}_gate_inter${band.tag}`, 'TiN', 'xg0', 'xg1',
-                  `yi${band.tag}_0`, `yi${band.tag}_1`, zha, zhb));
+    L.push(cuboid(`${tag}_gate_inter${band.tag}`, 'TiN', G.xg0, G.xg1,
+                  band.lo, band.hi, zha, zhb));
   }
-  L.push(cuboid(`${tag}_gate_top`,      'TiN', 'xg0', 'xg1', 'ygt0',   'ygt1',   zga, zgb));
+  L.push(cuboid(`${tag}_gate_top`,      'TiN', G.xg0, G.xg1, G.ygt0,   G.ygt1,   zga, zgb));
   L.push('');
 
-  for (const [sp, xa, xb] of [['S', 'x1', 'xg0'], ['D', 'xg1', 'x2']]) {
-    L.push(cuboid(`${tag}_Sp${sp}_zlo`, 'Si3N4', xa, xb, 'yl0', 'ygt1', zga, zca));
-    L.push(cuboid(`${tag}_Sp${sp}_zhi`, 'Si3N4', xa, xb, 'yl0', 'ygt1', zcb, zgb));
-    L.push(cuboid(`${tag}_Sp${sp}_b`, 'Si3N4', xa, xb, 'yl0', 'ya1', zca, zcb));
+  for (const [sp, xa, xb] of [['S', G.x1, G.xg0], ['D', G.xg1, G.x2]]) {
+    L.push(cuboid(`${tag}_Sp${sp}_zlo`, 'Si3N4', xa, xb, G.yl0, G.ygt1, zga, zca));
+    L.push(cuboid(`${tag}_Sp${sp}_zhi`, 'Si3N4', xa, xb, G.yl0, G.ygt1, zcb, zgb));
+    L.push(cuboid(`${tag}_Sp${sp}_b`, 'Si3N4', xa, xb, G.yl0, G.sheets[0].a, zca, zcb));
     for (let i = 0; i + 1 < N; i++) {
       L.push(cuboid(`${tag}_Sp${sp}_m${i + 1}`, 'Si3N4', xa, xb,
-                    'yb' + (i + 1), 'ya' + (i + 2), zca, zcb));
+                    G.sheets[i].b, G.sheets[i + 1].a, zca, zcb));
     }
-    L.push(cuboid(`${tag}_Sp${sp}_t`, 'Si3N4', xa, xb, topB, 'ygt1', zca, zcb));
+    L.push(cuboid(`${tag}_Sp${sp}_t`, 'Si3N4', xa, xb, topB, G.ygt1, zca, zcb));
   }
   return L;
 }
@@ -1153,59 +1161,16 @@ function buildFlatScm(G, meshPrefix, C) {
   push('(sdegeo:set-default-boolean "ABA")');
   push('');
 
-  // ---- parameters ----
-  push(`(define T_NS      ${n(G.T_NS)})`);
-  push(`(define W_NS      ${n(G.W_NS)})`);
-  push(`(define t_wall    ${n(G.T_FORK)})`);
-  push('');
-  push(`(define L_pad     ${n(C.L_PAD)})`);
-  push(`(define t_spacer  ${n(C.T_SPACER)})`);
-  push(`(define L_G       ${n(C.L_G)})`);
-  push(`(define t_hfo2    ${n(C.T_HFO2)})`);
-  push(`(define t_metal   ${n(C.T_METAL)})`);
-  push(`(define t_liner   ${n(C.T_LINER)})`);
-  push(`(define t_bridge  ${n(C.T_BRIDGE)})`);
-  push(`(define t_sub     ${n(C.T_SUB)})`);
-  push(`(define t_well    ${n(C.T_WELL)})`);
-  push('');
-  for (const [k, v] of [['x0', G.x0], ['x1', G.x1], ['xg0', G.xg0],
-                        ['xg1', G.xg1], ['x2', G.x2], ['x3', G.x3]]) {
-    push(`(define ${k.padEnd(7)} ${n(v)})`);
-  }
-  push('');
-  const yDefs = [['yl0', G.yl0], ['yl1', G.yl1], ['ygb0', G.ygb0], ['ygb1', G.ygb1],
-                 ['y_pitch', G.y_pitch]];
-  G.sheets.forEach((sh, i) => {
-    yDefs.push(['ya' + (i + 1), sh.a], ['yb' + (i + 1), sh.b]);
-  });
-  yDefs.push(['ygt0', G.ygt0], ['ygt1', G.ygt1]);
-  for (const band of G.inter) {
-    yDefs.push([`yi${band.tag}_0`, band.lo], [`yi${band.tag}_1`, band.hi]);
-  }
-  yDefs.push(['ybr0', G.ybr0], ['ybr1', G.ybr1],
-             ['y_sd0', G.y_sd0], ['y_sd1', G.y_sd1],
-             ['ysub0', G.ysub0], ['ywell', G.ywell], ['ysub1', G.ysub1]);
-  for (const [k, v] of yDefs) push(`(define ${k.padEnd(7)} ${n(v)})`);
-  push('');
-  for (const [k, v] of [['zng0', G.zng0], ['znh0', G.znh0], ['znc0', G.znc0], ['znc1', G.znc1],
-                        ['znh1', G.znh1], ['zng1', G.zng1], ['zw0', G.zw0], ['zw1', G.zw1],
-                        ['zpg0', G.zpg0], ['zph0', G.zph0], ['zpc0', G.zpc0], ['zpc1', G.zpc1],
-                        ['zph1', G.zph1], ['zpg1', G.zpg1], ['z_well', G.z_well],
-                        ['znc_mid', G.znc_mid], ['zpc_mid', G.zpc_mid]]) {
-    push(`(define ${k.padEnd(7)} ${n(v)})`);
-  }
-  push('');
-
   // ---- geometry: substrate, fork wall, then each transistor ----
-  push(cuboid('Substrate_Bulk', 'Silicon', 'x0', 'x3', 'ysub0', 'ywell',  'zng0',   'zpg1'));
-  push(cuboid('Substrate_PW',   'Silicon', 'x0', 'x3', 'ywell', 'ysub1',  'zng0',   'z_well'));
-  push(cuboid('Substrate_NW',   'Silicon', 'x0', 'x3', 'ywell', 'ysub1',  'z_well', 'zpg1'));
+  push(cuboid('Substrate_Bulk', 'Silicon', G.x0, G.x3, G.ysub0, G.ywell,  G.zng0,   G.zpg1));
+  push(cuboid('Substrate_PW',   'Silicon', G.x0, G.x3, G.ywell, G.ysub1,  G.zng0,   G.z_well));
+  push(cuboid('Substrate_NW',   'Silicon', G.x0, G.x3, G.ywell, G.ysub1,  G.z_well, G.zpg1));
   push('');
-  push(cuboid('ForkWall', 'Si3N4', 'x0', 'x3', 'ysub1', 'ygt1', 'zw0', 'zw1'));
+  push(cuboid('ForkWall', 'Si3N4', G.x0, G.x3, G.ysub1, G.ygt1, G.zw0, G.zw1));
   push('');
-  push(...flatDevice('n', 'zng0', 'znh0', 'znc0', 'znc1', 'znh1', 'zng1', G));
+  push(...flatDevice('n', G.zng0, G.znh0, G.znc0, G.znc1, G.znh1, G.zng1, G, C));
   push('');
-  push(...flatDevice('p', 'zpg0', 'zph0', 'zpc0', 'zpc1', 'zph1', 'zpg1', G));
+  push(...flatDevice('p', G.zpg0, G.zph0, G.zpc0, G.zpc1, G.zph1, G.zpg1, G, C));
   push('');
 
   // ---- doping ----
@@ -1249,13 +1214,13 @@ function buildFlatScm(G, meshPrefix, C) {
   push('(sdegeo:define-contact-set "substrate" 4.0 (color:rgb 0.55 0.55 0.60) "##")');
   push('');
   for (const [set, px, py, pz] of [
-    ['source_n', `${n((G.x0 + G.x1) / 2)}`, 'y_sd1', 'znc_mid'],
-    ['drain_n',  `${n((G.x2 + G.x3) / 2)}`, 'y_sd1', 'znc_mid'],
-    ['gate_n',   `${n((G.xg0 + G.xg1) / 2)}`, 'ygt1', 'znc_mid'],
-    ['source_p', `${n((G.x0 + G.x1) / 2)}`, 'y_sd1', 'zpc_mid'],
-    ['drain_p',  `${n((G.x2 + G.x3) / 2)}`, 'y_sd1', 'zpc_mid'],
-    ['gate_p',   `${n((G.xg0 + G.xg1) / 2)}`, 'ygt1', 'zpc_mid'],
-    ['substrate', `${n((G.x0 + G.x3) / 2)}`, 'ysub0', 'znc_mid'],
+    ['source_n',  n((G.x0 + G.x1) / 2),   n(G.y_sd1), n(G.znc_mid)],
+    ['drain_n',   n((G.x2 + G.x3) / 2),   n(G.y_sd1), n(G.znc_mid)],
+    ['gate_n',    n((G.xg0 + G.xg1) / 2), n(G.ygt1),  n(G.znc_mid)],
+    ['source_p',  n((G.x0 + G.x1) / 2),   n(G.y_sd1), n(G.zpc_mid)],
+    ['drain_p',   n((G.x2 + G.x3) / 2),   n(G.y_sd1), n(G.zpc_mid)],
+    ['gate_p',    n((G.xg0 + G.xg1) / 2), n(G.ygt1),  n(G.zpc_mid)],
+    ['substrate', n((G.x0 + G.x3) / 2),   n(G.ysub0), n(G.znc_mid)],
   ]) {
     push(`(sdegeo:set-current-contact-set "${set}")`);
     push(`(sdegeo:set-contact-faces (find-face-id (position ${px} ${py} ${pz})) "${set}")`);
@@ -1263,34 +1228,32 @@ function buildFlatScm(G, meshPrefix, C) {
   push('');
 
   // ---- mesh ----
-  // the junction windows bracket the whole stack, so they follow its top
-  const topSheet = 'yb' + G.sheets.length;
   push('(sdedr:define-refinement-size "RS_global" 0.020 0.020 0.020 0.006 0.006 0.006)');
-  push('(sdedr:define-refinement-window "RW_global" "Cuboid" (position x0 ysub0 zng0) (position x3 ygt1 zpg1))');
+  push(`(sdedr:define-refinement-window "RW_global" "Cuboid" (position ${n(G.x0)} ${n(G.ysub0)} ${n(G.zng0)}) (position ${n(G.x3)} ${n(G.ygt1)} ${n(G.zpg1)}))`);
   push('(sdedr:define-refinement-placement "RP_global" "RS_global" "RW_global")');
   push('');
   push('(sdedr:define-refinement-size "RS_active" 0.005 0.002 0.005 0.003 0.001 0.003)');
-  push('(sdedr:define-refinement-window "RW_actN" "Cuboid" (position (- x1 0.003) yl0 (- zng0 0.002)) (position (+ x2 0.003) (+ ygt1 0.002) (+ zng1 0.002)))');
+  push(`(sdedr:define-refinement-window "RW_actN" "Cuboid" (position ${n(G.x1 - 0.003)} ${n(G.yl0)} ${n(G.zng0 - 0.002)}) (position ${n(G.x2 + 0.003)} ${n(G.ygt1 + 0.002)} ${n(G.zng1 + 0.002)}))`);
   push('(sdedr:define-refinement-placement "RP_actN" "RS_active" "RW_actN")');
-  push('(sdedr:define-refinement-window "RW_actP" "Cuboid" (position (- x1 0.003) yl0 (- zpg0 0.002)) (position (+ x2 0.003) (+ ygt1 0.002) (+ zpg1 0.002)))');
+  push(`(sdedr:define-refinement-window "RW_actP" "Cuboid" (position ${n(G.x1 - 0.003)} ${n(G.yl0)} ${n(G.zpg0 - 0.002)}) (position ${n(G.x2 + 0.003)} ${n(G.ygt1 + 0.002)} ${n(G.zpg1 + 0.002)}))`);
   push('(sdedr:define-refinement-placement "RP_actP" "RS_active" "RW_actP")');
   push('');
   push('(sdedr:define-refinement-size "RS_junc" 0.002 0.002 0.005 0.0015 0.001 0.003)');
-  push(`(sdedr:define-refinement-window "RW_jNs" "Cuboid" (position (- xg0 0.005) ya1 znh0) (position (+ xg0 0.005) ${topSheet} znh1))`);
+  push(`(sdedr:define-refinement-window "RW_jNs" "Cuboid" (position ${n(G.xg0 - 0.005)} ${n(G.sheets[0].a)} ${n(G.znh0)}) (position ${n(G.xg0 + 0.005)} ${n(G.sheets[G.sheets.length - 1].b)} ${n(G.znh1)}))`);
   push('(sdedr:define-refinement-placement "RP_jNs" "RS_junc" "RW_jNs")');
-  push(`(sdedr:define-refinement-window "RW_jNd" "Cuboid" (position (- xg1 0.005) ya1 znh0) (position (+ xg1 0.006) ${topSheet} znh1))`);
+  push(`(sdedr:define-refinement-window "RW_jNd" "Cuboid" (position ${n(G.xg1 - 0.005)} ${n(G.sheets[0].a)} ${n(G.znh0)}) (position ${n(G.xg1 + 0.006)} ${n(G.sheets[G.sheets.length - 1].b)} ${n(G.znh1)}))`);
   push('(sdedr:define-refinement-placement "RP_jNd" "RS_junc" "RW_jNd")');
-  push(`(sdedr:define-refinement-window "RW_jPs" "Cuboid" (position (- xg0 0.005) ya1 zph0) (position (+ xg0 0.005) ${topSheet} zph1))`);
+  push(`(sdedr:define-refinement-window "RW_jPs" "Cuboid" (position ${n(G.xg0 - 0.005)} ${n(G.sheets[0].a)} ${n(G.zph0)}) (position ${n(G.xg0 + 0.005)} ${n(G.sheets[G.sheets.length - 1].b)} ${n(G.zph1)}))`);
   push('(sdedr:define-refinement-placement "RP_jPs" "RS_junc" "RW_jPs")');
-  push(`(sdedr:define-refinement-window "RW_jPd" "Cuboid" (position (- xg1 0.005) ya1 zph0) (position (+ xg1 0.006) ${topSheet} zph1))`);
+  push(`(sdedr:define-refinement-window "RW_jPd" "Cuboid" (position ${n(G.xg1 - 0.005)} ${n(G.sheets[0].a)} ${n(G.zph0)}) (position ${n(G.xg1 + 0.006)} ${n(G.sheets[G.sheets.length - 1].b)} ${n(G.zph1)}))`);
   push('(sdedr:define-refinement-placement "RP_jPd" "RS_junc" "RW_jPd")');
   push('');
   push('(sdedr:define-refinement-size "RS_well" 0.020 0.010 0.008 0.008 0.004 0.004)');
-  push('(sdedr:define-refinement-window "RW_well" "Cuboid" (position x0 ywell zng0) (position x3 ysub1 zpg1))');
+  push(`(sdedr:define-refinement-window "RW_well" "Cuboid" (position ${n(G.x0)} ${n(G.ywell)} ${n(G.zng0)}) (position ${n(G.x3)} ${n(G.ysub1)} ${n(G.zpg1)}))`);
   push('(sdedr:define-refinement-placement "RP_well" "RS_well" "RW_well")');
   push('');
   push('(sdedr:define-refinement-size "RS_sub" 0.025 0.025 0.025 0.008 0.008 0.008)');
-  push('(sdedr:define-refinement-window "RW_sub" "Cuboid" (position x0 ysub0 zng0) (position x3 ywell zpg1))');
+  push(`(sdedr:define-refinement-window "RW_sub" "Cuboid" (position ${n(G.x0)} ${n(G.ysub0)} ${n(G.zng0)}) (position ${n(G.x3)} ${n(G.ywell)} ${n(G.zpg1)}))`);
   push('(sdedr:define-refinement-placement "RP_sub" "RS_sub" "RW_sub")');
   push('');
 
@@ -2500,12 +2463,34 @@ function loadSdeText(text, label) {
     ? '<strong>' + escapeHtml(label) + '</strong>'
     : '<strong>pasted text</strong>';
 
-  /* ---- is this one of our own parameter sets? then drive the generator ---- */
+  /* ---- can the parametric model be driven from this file? ----
+     Two routes, in order of authority:
+
+       1. explicit (define T_NS ...) bindings, if the file has them
+       2. measurement of the geometry itself
+
+     Route 2 matters now that the step-by-step output carries no define
+     block at all - there is nothing to read back from it. It also turns
+     out to be the more useful route: it recognises any forksheet file,
+     not only ones this generator wrote. */
   const b = parsed.bindings;
-  const fork = b.t_wall !== undefined ? b.t_wall : b.T_FORK;
-  const hasParams = typeof b.T_NS === 'number' &&
-                    typeof b.W_NS === 'number' &&
-                    typeof fork === 'number';
+  const measured = (window.SDEAnalyze && window.SDEAnalyze.extractParams)
+    ? (window.SDEAnalyze.extractParams(parsed) || { params: {}, from: {} })
+    : { params: {}, from: {} };
+
+  const pick = (defineName, altName, key) => {
+    if (typeof b[defineName] === 'number') return { v: b[defineName], how: 'define' };
+    if (altName && typeof b[altName] === 'number') return { v: b[altName], how: 'define' };
+    if (typeof measured.params[key] === 'number') {
+      return { v: measured.params[key], how: 'measured' };
+    }
+    return null;
+  };
+
+  const tns = pick('T_NS', null, 'T_NS');
+  const wns = pick('W_NS', null, 'W_NS');
+  const fk = pick('t_wall', 'T_FORK', 'T_FORK');
+  const hasParams = !!(tns && wns && fk);
 
   if (hasParams) {
     clearImport(true);
@@ -2517,32 +2502,30 @@ function loadSdeText(text, label) {
       el.value = /^D_/.test(id) ? conc(v) : v;
       return true;
     };
-    set('T_NS', b.T_NS);
-    set('W_NS', b.W_NS);
-    set('T_FORK', fork);
+    set('T_NS', tns.v);
+    set('W_NS', wns.v);
+    set('T_FORK', fk.v);
 
-    // the constants carry SDE's names, not the study's; map them across
+    /* The remaining fields: a define wins where one exists, otherwise the
+       measurement. SDE's define names differ from the study's, so they are
+       mapped across. */
     const constMap = {
-      L_pad: 'L_PAD', t_spacer: 'T_SPACER', L_G: 'L_G', t_hfo2: 'T_HFO2',
-      t_metal: 'T_METAL', t_liner: 'T_LINER', t_bridge: 'T_BRIDGE',
-      t_sub: 'T_SUB', t_well: 'T_WELL',
+      L_PAD: 'L_pad', T_SPACER: 't_spacer', L_G: 'L_G', T_HFO2: 't_hfo2',
+      T_METAL: 't_metal', T_LINER: 't_liner', T_BRIDGE: 't_bridge',
+      T_SUB: 't_sub', T_WELL: 't_well', N_SHEETS: null,
     };
     const picked = [];
-    for (const key of Object.keys(constMap)) {
-      if (set(constMap[key], b[key])) picked.push(constMap[key]);
+    let measuredCount = 0;
+    for (const field of Object.keys(constMap)) {
+      const got = pick(constMap[field] || field, field, field);
+      if (got && set(field, got.v)) {
+        picked.push(field);
+        if (got.how === 'measured') measuredCount++;
+      }
     }
-
-    // sheet count comes from the geometry, not from a define
-    let sheetsFound = 0;
-    if (window.SDEAnalyze) {
-      try {
-        const rep = window.SDEAnalyze.analyze(parsed);
-        if (rep.ok && rep.columns.length) {
-          sheetsFound = rep.columns[0].bands.length;
-          if (set('N_SHEETS', sheetsFound)) picked.push('N_SHEETS');
-        }
-      } catch (_) { /* fall back to whatever is in the field */ }
-    }
+    const sheetsFound = measured.params.N_SHEETS || 0;
+    const byMeasurement = measuredCount + [tns, wns, fk]
+      .filter((x) => x && x.how === 'measured').length;
 
     // doping concentrations come from the profile definitions
     const profMap = {
@@ -2565,10 +2548,12 @@ function loadSdeText(text, label) {
     doGenerate();
 
     setImportStatus('ok',
-      '<strong>Loaded as parameters.</strong> ' + src + ' defines T_NS, W_NS and ' +
-      'the fork wall, so the generator is driving the preview again. ' +
-      picked.length + ' further parameter(s) were measured from the file' +
-      (sheetsFound ? ' (including a ' + sheetsFound + '-sheet stack)' : '') + ', and ' +
+      '<strong>Loaded as parameters.</strong> ' + src + ' yielded a nanosheet ' +
+      'thickness, width and fork wall, so the generator is driving the preview again. ' +
+      picked.length + ' further parameter(s) recovered' +
+      (byMeasurement ? ' (' + byMeasurement + ' measured from the geometry, ' +
+        'the file carries no define block)' : " from the file's define block") +
+      (sheetsFound ? ', including a ' + sheetsFound + '-sheet stack' : '') + ', and ' +
       parsed.regions.length + ' region(s) were read back to confirm it parses. ' +
       'The Structure analysis panel lists everything that was measured. ' +
       'Edit any control to regenerate.');

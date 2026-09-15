@@ -1149,6 +1149,99 @@
       `(k is not stored in the SCM)`);
   }
 
+  /**
+   * Recover the parametric model's inputs by measuring the geometry.
+   *
+   * The step-by-step script carries no (define ...) block - every
+   * coordinate is a literal - so there is nothing to read back. Measuring
+   * instead turns out to be the better answer anyway: it works on any
+   * forksheet file, including ones this generator never wrote.
+   *
+   * Only values that can be measured are returned, each with a note saying
+   * how. Anything not derivable is simply absent, so the caller leaves that
+   * control alone rather than overwriting it with a guess.
+   */
+  function extractParams(parsed) {
+    const regions = (parsed.regions || []);
+    if (!regions.length) return null;
+
+    const columns = findChannelColumns(regions);
+    const arch = detectArchitecture(regions, columns);
+    if (!columns.length) return { params: {}, from: {}, arch, columns };
+
+    const params = {}, from = {};
+    const put = (k, v, how) => {
+      if (Number.isFinite(v) && v > TOL) { params[k] = round(v, 9); from[k] = how; }
+    };
+
+    const isMetal = (m) => /tin|tan|tungsten|^w$|poly|aluminum|aluminium|copper/i.test(m);
+    const isHighK = (m) => /hfo2|al2o3|zro2/i.test(m);
+    const metal = regions.filter((r) => isMetal(r.material));
+    const highk = regions.filter((r) => isHighK(r.material));
+    const semi = regions.filter((r) => /^(silicon|germanium|sige)$/i.test(r.material));
+
+    const c0 = columns[0];
+    const b0 = c0.bands[0];
+    put('T_NS', b0.y1 - b0.y0, 'height of a sheet band');
+    put('W_NS', c0.z1 - c0.z0, 'Z footprint of the channel column');
+    put('N_SHEETS', c0.bands.length, 'number of bands in column 1');
+
+    if (metal.length) {
+      const gx0 = Math.min(...metal.map((r) => r.x0));
+      const gx1 = Math.max(...metal.map((r) => r.x1));
+      put('L_G', mode(metal.map((r) => round(span(r, 'x'), 9))),
+          'most common X extent among the gate metal pieces');
+
+      // the pad edge, skipping the extension that runs up to the gate
+      const padEdges = semi.filter((r) => r.x1 < gx0 - TOL && r.y1 > TOL).map((r) => r.x1);
+      if (padEdges.length) {
+        const padL = Math.max(...padEdges);
+        put('T_SPACER', gx0 - padL, 'gate edge to source pad edge');
+        const pad = semi.filter((r) => Math.abs(r.x1 - padL) < TOL && r.y1 > TOL);
+        if (pad.length) put('L_PAD', padL - Math.min(...pad.map((r) => r.x0)), 'source pad X extent');
+      }
+      // gate bridge: metal outer face to the high-k outer face, in Z
+      if (highk.length) {
+        const colMetal = metal.filter((r) => r.z0 < c0.z0 + TOL);
+        const colHk = highk.filter((r) => r.z0 < c0.z0 + TOL);
+        if (colMetal.length && colHk.length) {
+          put('T_BRIDGE', Math.min(...colHk.map((r) => r.z0)) - Math.min(...colMetal.map((r) => r.z0)),
+              'gate outer face to high-k outer face in Z');
+        }
+      }
+    }
+
+    if (arch.wall) put('T_FORK', span(arch.wall, 'z'), `Z thickness of "${arch.wall.name}"`);
+
+    if (highk.length) {
+      const t = Math.min(...highk.map((r) =>
+        Math.min(span(r, 'x'), span(r, 'y'), span(r, 'z'))));
+      put('T_HFO2', t, 'thinnest high-k slab');
+      // pitch = sheet + two collars + metal, so the metal falls out of it
+      if (c0.bands.length > 1) {
+        const pitch = c0.bands[1].y0 - c0.bands[0].y0;
+        put('T_METAL', pitch - (b0.y1 - b0.y0) - 2 * t,
+            'sheet pitch minus the sheet and its two collars');
+      }
+    }
+
+    const oxide = regions.filter((r) => /^sio2$/i.test(r.material));
+    if (oxide.length) {
+      const liner = oxide.slice().sort((a, b) => span(a, 'y') - span(b, 'y'))[0];
+      put('T_LINER', span(liner, 'y'), `Y thickness of "${liner.name}"`);
+    }
+
+    const below = regions.filter((r) => r.y0 < -TOL);
+    if (below.length) {
+      put('T_SUB', -Math.min(...below.map((r) => r.y0)), 'deepest region below y = 0');
+      const wellBottoms = uniq(below.map((r) => round(r.y0, 9)))
+        .filter((v) => v > Math.min(...below.map((r) => r.y0)) + TOL);
+      if (wellBottoms.length) put('T_WELL', -Math.max(...wellBottoms), 'well / bulk boundary');
+    }
+
+    return { params, from, arch, columns };
+  }
+
   /** Is the high-k actually wrapped all the way round each sheet? */
   function collarCoverage(highk, columns) {
     if (!columns.length) return `${highk.length} pieces`;
@@ -1173,7 +1266,8 @@
   }
 
   window.SDEAnalyze = {
-    analyze, check, checkRequired, dopingMap, dopingLegend, classify,
+    analyze, check, checkRequired, extractParams,
+    dopingMap, dopingLegend, classify,
     boundsOf, overlapVolume, touches, gapBetween,
     DOPING_CLASSES, UNDOPED,
   };

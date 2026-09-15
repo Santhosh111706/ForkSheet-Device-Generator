@@ -10,9 +10,11 @@ It is a direct port of the Python generator `gen_forksheet.py` and emits the
 SCM Device Viewer project.
 
 Output is a **step-by-step script** by default: every command written out one
-by one, no comments, in the order a device is built - parameters, geometry,
-doping, contacts, mesh, build. Two structured formats are also available under
-Generation options. All three describe the same device.
+by one, no comments and no `(define ...)` block - each coordinate is a literal
+number, so every line stands on its own. The order is the order a device is
+built: geometry, doping, contacts, mesh, build. Two structured formats keeping
+the V8 helper procedures and their defines are also available under Generation
+options. All three describe the same device.
 
 It also **reads** SDE: open an `.scm` file, paste commands, or drag a file onto
 the page. The input is recognised by its content, so a saved file and a pasted
@@ -103,8 +105,12 @@ Everything runs in the browser.
 - Open an `.scm` file, paste SDE text, or drop a file anywhere on the page
 - The format is detected from the content, not the file extension, so a
   `.txt` holding SDE commands is read correctly
-- Input that binds `T_NS`, `W_NS` and the fork wall is loaded into the
-  controls and drives the parametric model, sweeps and validation included
+- Input that yields a nanosheet thickness, width and fork wall is loaded
+  into the controls and drives the parametric model, sweeps and validation
+  included. The values come from `(define ...)` bindings where the file has
+  them, and are otherwise **measured from the geometry** - which is what
+  makes the step-by-step output round-trip despite carrying no defines, and
+  what lets any forksheet file be loaded, not only ones this app wrote
 - Any other SDE text is shown as geometry: the regions go to the 3D preview
   and the script panel gets the same commands written back out cleanly
 - Procedure definitions are expanded, so a script whose geometry is built by
@@ -280,18 +286,21 @@ Current output, measured across the six reference cases. Every case produces
 88 regions, 5 materials, 7 contacts, 25 doping placements and 23 refinements
 in every format:
 
-| case | step-by-step | structured | annotated |
+| format | lines | bytes | defines |
 |---|---|---|---|
-| `fork_TNS_0.004_WNS_0.022_TFORK_0.007` | 259 lines, 16102 B | 282 lines, 11563 B | 482 lines, 22926 B |
-| `fork_TNS_0.004_WNS_0.030_TFORK_0.008` | 259 lines, 16096 B | 282 lines, 11557 B | 482 lines, 22917 B |
-| `fork_TNS_0.005_WNS_0.020_TFORK_0.006` | 259 lines, 16095 B | 282 lines, 11558 B | 482 lines, 22915 B |
-| `fork_TNS_0.006_WNS_0.015_TFORK_0.010` | 259 lines, 16101 B | 282 lines, 11560 B | 482 lines, 22931 B |
-| `fork_TNS_0.006_WNS_0.030_TFORK_0.008` | 259 lines, 16095 B | 282 lines, 11556 B | 482 lines, 22918 B |
-| `fork_TNS_0.008_WNS_0.025_TFORK_0.012` | 259 lines, 16104 B | 282 lines, 11563 B | 482 lines, 22935 B |
+| step-by-step (default) | 194 | ~15000 | 0 |
+| structured | 281 | 11556 | 63 |
+| annotated | 481 | 22918 | 63 |
 
-The step-by-step script is longer in bytes than the structured one because
-each cuboid is written out instead of being produced by a procedure called
-twice; it is the same 88 regions either way.
+The step-by-step script has no define block, so it is shorter in lines than
+the structured one but longer in bytes: each cuboid carries its own literal
+coordinates instead of naming a symbol. It is the same 88 regions either way.
+
+All thirteen parametric inputs can be recovered from a step-by-step file by
+measurement alone - `T_NS`, `W_NS`, `T_FORK`, `L_G`, `T_SPACER`, `L_PAD`,
+`N_SHEETS`, `T_HFO2`, `T_METAL`, `T_LINER`, `T_BRIDGE`, `T_SUB`, `T_WELL` -
+checked exactly against the values the generator was given, across several
+cases.
 
 Equivalence is not asserted, it is checked. The test parses the step-by-step
 output and the annotated output with `window.SDE` and compares the resulting
