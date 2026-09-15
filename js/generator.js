@@ -1880,7 +1880,9 @@ function initGenerator() {
       .catch(() => setStatus('warn', 'Clipboard blocked by the browser', ['use Download instead']));
   });
 
-  $$('.section-head').forEach((h) => {
+  // .static headers are labels, not toggles - the Generate card has one so
+  // its buttons are clearly their own section and not part of the card above
+  $$('.section-head:not(.static)').forEach((h) => {
     h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed'));
   });
 

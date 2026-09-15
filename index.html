@@ -114,122 +114,6 @@
       </div>
     </div>
 
-    <!-- ---------- generation options ---------- -->
-    <div class="card collapsed">
-      <div class="section-head"><h2>Generation options</h2><span class="chev"></span></div>
-      <div class="section-body">
-
-        <div class="field">
-          <label for="gen-mode">Mode</label>
-          <div class="ctl">
-            <select id="gen-mode">
-              <option value="single">Single geometry case</option>
-              <option value="one_at_a_time">Sweep &mdash; one parameter at a time</option>
-              <option value="full_grid">Sweep &mdash; full grid</option>
-            </select>
-          </div>
-          <small>One at a time varies each parameter while holding the other two at the values above. Full grid takes every combination.</small>
-        </div>
-
-        <div id="sweep-fields">
-          <p class="note">
-            Tick the variables to sweep and give each a comma-separated list.
-            Unticked parameters hold the value set above. A full grid is the
-            product of every ticked list, so it grows quickly &mdash; the case
-            count below is live.
-          </p>
-
-          <div class="sweep-row">
-            <label class="chk-field" title="nanosheet thickness">
-              <input type="checkbox" id="sweep-on-T_NS" checked>
-              <span>T_NS</span>
-            </label>
-            <input id="sweep-T_NS" type="text" spellcheck="false"
-                   aria-label="T_NS sweep values">
-          </div>
-          <div class="sweep-row">
-            <label class="chk-field" title="nanosheet width">
-              <input type="checkbox" id="sweep-on-W_NS" checked>
-              <span>W_NS</span>
-            </label>
-            <input id="sweep-W_NS" type="text" spellcheck="false"
-                   aria-label="W_NS sweep values">
-          </div>
-          <div class="sweep-row">
-            <label class="chk-field" title="gate length">
-              <input type="checkbox" id="sweep-on-L_G" checked>
-              <span>L_G</span>
-            </label>
-            <input id="sweep-L_G" type="text" spellcheck="false"
-                   aria-label="L_G sweep values">
-          </div>
-          <div class="sweep-row">
-            <label class="chk-field" title="spacer thickness">
-              <input type="checkbox" id="sweep-on-T_SPACER" checked>
-              <span>T_SPACER</span>
-            </label>
-            <input id="sweep-T_SPACER" type="text" spellcheck="false"
-                   aria-label="T_SPACER sweep values">
-          </div>
-          <div class="sweep-row">
-            <label class="chk-field" title="source/drain length">
-              <input type="checkbox" id="sweep-on-L_PAD" checked>
-              <span>L_PAD</span>
-            </label>
-            <input id="sweep-L_PAD" type="text" spellcheck="false"
-                   aria-label="L_PAD sweep values">
-          </div>
-          <div class="sweep-row">
-            <label class="chk-field" title="number of nanosheets">
-              <input type="checkbox" id="sweep-on-N_SHEETS" checked>
-              <span>N_NS</span>
-            </label>
-            <input id="sweep-N_SHEETS" type="text" spellcheck="false"
-                   aria-label="N_NS sweep values">
-          </div>
-          <div class="sweep-row">
-            <label class="chk-field" title="fork wall thickness">
-              <input type="checkbox" id="sweep-on-T_FORK">
-              <span>T_FORK</span>
-            </label>
-            <input id="sweep-T_FORK" type="text" spellcheck="false"
-                   aria-label="T_FORK sweep values">
-          </div>
-
-          <div id="sweep-count" class="import-status">No cases.</div>
-        </div>
-
-        <div class="field">
-          <label for="mesh-prefix-mode">Mesh prefix</label>
-          <div class="ctl">
-            <select id="mesh-prefix-mode">
-              <option value="auto">auto &mdash; name the mesh after the case</option>
-              <option value="custom">custom &mdash; fixed name</option>
-            </select>
-          </div>
-          <small>auto keeps sweep runs from overwriting each other. A fixed name such as fork1108 matches an existing sdevice.cmd Grid entry.</small>
-        </div>
-
-        <div class="field">
-          <label for="mesh-prefix-custom">Custom prefix</label>
-          <div class="ctl"><input id="mesh-prefix-custom" type="text" value="fork1108" disabled></div>
-          <small>writes &lt;prefix&gt;_msh.tdr</small>
-        </div>
-
-        <div class="field">
-          <label for="scm-format">Output format</label>
-          <div class="ctl">
-            <select id="scm-format">
-              <option value="flat">Step-by-step commands</option>
-              <option value="structured">Structured &mdash; helper procedures</option>
-              <option value="annotated">Structured with comments</option>
-            </select>
-          </div>
-          <small>Step-by-step writes every command out one by one with no comments, the way you would type it into a script window. The structured forms keep the V8 helper procedures.</small>
-        </div>
-      </div>
-    </div>
-
     <!-- ---------- study parameters ---------- -->
     <div class="card">
       <div class="section-head"><h2>Study parameters</h2><span class="chev"></span></div>
@@ -402,8 +286,125 @@
       </div>
     </div>
 
+    <!-- ---------- generation options ---------- -->
+    <div class="card collapsed">
+      <div class="section-head"><h2>Generation options</h2><span class="chev"></span></div>
+      <div class="section-body">
+
+        <div class="field">
+          <label for="gen-mode">Mode</label>
+          <div class="ctl">
+            <select id="gen-mode">
+              <option value="single">Single geometry case</option>
+              <option value="one_at_a_time">Sweep &mdash; one parameter at a time</option>
+              <option value="full_grid">Sweep &mdash; full grid</option>
+            </select>
+          </div>
+          <small>One at a time varies each parameter while holding the other two at the values above. Full grid takes every combination.</small>
+        </div>
+
+        <div id="sweep-fields">
+          <p class="note">
+            Tick the variables to sweep and give each a comma-separated list.
+            Unticked parameters hold the value set above. A full grid is the
+            product of every ticked list, so it grows quickly &mdash; the case
+            count below is live.
+          </p>
+
+          <div class="sweep-row">
+            <label class="chk-field" title="nanosheet thickness">
+              <input type="checkbox" id="sweep-on-T_NS" checked>
+              <span>T_NS</span>
+            </label>
+            <input id="sweep-T_NS" type="text" spellcheck="false"
+                   aria-label="T_NS sweep values">
+          </div>
+          <div class="sweep-row">
+            <label class="chk-field" title="nanosheet width">
+              <input type="checkbox" id="sweep-on-W_NS" checked>
+              <span>W_NS</span>
+            </label>
+            <input id="sweep-W_NS" type="text" spellcheck="false"
+                   aria-label="W_NS sweep values">
+          </div>
+          <div class="sweep-row">
+            <label class="chk-field" title="gate length">
+              <input type="checkbox" id="sweep-on-L_G" checked>
+              <span>L_G</span>
+            </label>
+            <input id="sweep-L_G" type="text" spellcheck="false"
+                   aria-label="L_G sweep values">
+          </div>
+          <div class="sweep-row">
+            <label class="chk-field" title="spacer thickness">
+              <input type="checkbox" id="sweep-on-T_SPACER" checked>
+              <span>T_SPACER</span>
+            </label>
+            <input id="sweep-T_SPACER" type="text" spellcheck="false"
+                   aria-label="T_SPACER sweep values">
+          </div>
+          <div class="sweep-row">
+            <label class="chk-field" title="source/drain length">
+              <input type="checkbox" id="sweep-on-L_PAD" checked>
+              <span>L_PAD</span>
+            </label>
+            <input id="sweep-L_PAD" type="text" spellcheck="false"
+                   aria-label="L_PAD sweep values">
+          </div>
+          <div class="sweep-row">
+            <label class="chk-field" title="number of nanosheets">
+              <input type="checkbox" id="sweep-on-N_SHEETS" checked>
+              <span>N_NS</span>
+            </label>
+            <input id="sweep-N_SHEETS" type="text" spellcheck="false"
+                   aria-label="N_NS sweep values">
+          </div>
+          <div class="sweep-row">
+            <label class="chk-field" title="fork wall thickness">
+              <input type="checkbox" id="sweep-on-T_FORK">
+              <span>T_FORK</span>
+            </label>
+            <input id="sweep-T_FORK" type="text" spellcheck="false"
+                   aria-label="T_FORK sweep values">
+          </div>
+
+          <div id="sweep-count" class="import-status">No cases.</div>
+        </div>
+
+        <div class="field">
+          <label for="mesh-prefix-mode">Mesh prefix</label>
+          <div class="ctl">
+            <select id="mesh-prefix-mode">
+              <option value="auto">auto &mdash; name the mesh after the case</option>
+              <option value="custom">custom &mdash; fixed name</option>
+            </select>
+          </div>
+          <small>auto keeps sweep runs from overwriting each other. A fixed name such as fork1108 matches an existing sdevice.cmd Grid entry.</small>
+        </div>
+
+        <div class="field">
+          <label for="mesh-prefix-custom">Custom prefix</label>
+          <div class="ctl"><input id="mesh-prefix-custom" type="text" value="fork1108" disabled></div>
+          <small>writes &lt;prefix&gt;_msh.tdr</small>
+        </div>
+
+        <div class="field">
+          <label for="scm-format">Output format</label>
+          <div class="ctl">
+            <select id="scm-format">
+              <option value="flat">Step-by-step commands</option>
+              <option value="structured">Structured &mdash; helper procedures</option>
+              <option value="annotated">Structured with comments</option>
+            </select>
+          </div>
+          <small>Step-by-step writes every command out one by one with no comments, the way you would type it into a script window. The structured forms keep the V8 helper procedures.</small>
+        </div>
+      </div>
+    </div>
+
     <!-- ---------- actions ---------- -->
-    <div class="card">
+    <div class="card actions-card">
+      <div class="section-head static"><h2>Generate</h2></div>
       <div class="section-body actions">
         <button id="btn-generate" class="btn primary" type="button">Generate</button>
         <button id="btn-download" class="btn" type="button" disabled>Download .scm</button>

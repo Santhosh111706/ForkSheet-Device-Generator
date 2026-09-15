@@ -319,6 +319,17 @@ body.resizing iframe { pointer-events: none; }
   border-top: 6px solid var(--fg-dim);
   transition: transform .15s;
 }
+/* a header that only labels its card; nothing to click, nothing to fold */
+.section-head.static { cursor: default; }
+.section-head.static:hover h2 { color: var(--fg-dim); }
+.section-head.static .chev { display: none; }
+
+/* the Generate card carries the primary actions, so it gets a little more
+   presence than the panels around it */
+.actions-card { border-color: var(--line-2); }
+.actions-card .section-head { background: var(--bg-3); }
+.actions-card .section-head h2 { color: var(--fg); }
+
 .card.collapsed .chev { transform: rotate(-90deg); }
 .card.collapsed .section-body { display: none; }
 
