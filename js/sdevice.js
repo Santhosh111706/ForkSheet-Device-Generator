@@ -112,6 +112,9 @@
         band2band: false,
         avalanche: false,
         quantum: false,
+        bandgapNarrowing: 'Slotboom',   // '' turns it off
+        surfaceSRH: false,              // interface recombination at the gate oxide
+        tunneling: '',                  // '' | 'NonlocalPath' | 'Schenk'
       },
 
       thermal: {
@@ -119,15 +122,26 @@
         thermode: bulk ? bulk.name : null,
         ambient: 300,
         surfaceResistance: 0,
+        latticeInit: 300,          // initial lattice temperature
+        heatFlux: true,            // write the heat-flux output variables
       },
 
       bias: {
         vdd: 0.75,
         vdlin: 0.05,
         vgStart: -0.30,            // start below Vt so Ioff and SS are in range
+        vgStep: 0.02,
+        vdStep: 0.02,
         idvd: true,
         idvgLin: true,
         idvgSat: true,
+        /* Starting potentials per electrode, keyed by the name that is
+           actually in the SCM - never a hard-coded "source"/"drain". */
+        initial: Object.fromEntries(elec.map((e) => [e.name, 0])),
+        sweepQuantity: 'voltage',  // voltage | current
+        analysis: 'quasistationary', // quasistationary | transient
+        transientEnd: 1e-9,
+        transientStep: 1e-12,
       },
 
       math: {
@@ -139,12 +153,18 @@
         relErrControl: true,
         method: 'Blocked',
         subMethod: 'ParDiSo',
+        initialGuess: 'zero',      // zero | previous
       },
 
       plot: {
         potential: true, field: true, carriers: true, doping: true,
         current: true, mobility: true, bands: true, recombination: true,
         temperature: true,
+      },
+
+      output: {
+        currentPlot: true,         // the CurrentPlot / .plt log
+        extraction: true,          // the extraction notes at the foot
       },
 
       meshControl: { size: 2.0 },  // nm, for the SCM refinement block
@@ -367,6 +387,7 @@
     P(`    Temperature = ${st.temperature}`);
     if (ph.fermi) P('    Fermi');
     if (ph.eid) P('    EffectiveIntrinsicDensity( OldSlotboom )');
+    if (ph.bandgapNarrowing) P(`    EffectiveIntrinsicDensity( BandGapNarrowing( ${ph.bandgapNarrowing} ) )`);
     const mob = [];
     if (ph.mobDoping) mob.push('DopingDependence');
     if (ph.mobEnormal) mob.push('Enormal');
@@ -381,13 +402,18 @@
     if (ph.auger) rec.push('Auger');
     if (ph.band2band) rec.push('Band2Band( Model = Hurkx )');
     if (ph.avalanche) rec.push('Avalanche( vanOverstraeten )');
+    if (ph.surfaceSRH) rec.push('SurfaceSRH');
     if (rec.length) {
       P('    Recombination(');
       for (const r of rec) P(`        ${r}`);
       P('    )');
     }
+    if (ph.tunneling) P(`    eBarrierTunneling( ${ph.tunneling} )  hBarrierTunneling( ${ph.tunneling} )`);
     if (ph.quantum) P('    eQuantumPotential  hQuantumPotential');
-    if (st.thermal.enabled) P('    Thermodynamic');
+    if (st.thermal.enabled) {
+      P('    Thermodynamic');
+      P(`    LatticeTemperature = ${st.thermal.latticeInit}`);
+    }
     P('}');
     P('');
 
@@ -409,16 +435,26 @@
     P('');
 
     /* ---------------- CurrentPlot ---------------- */
-    if (st.thermal.enabled) {
-      const wanted = currentPlotRegions(regions, devs);
-      P('CurrentPlot {');
-      P('    LatticeTemperature( Maximum( Material = "Silicon" )');
-      P('                        Average( Material = "Silicon" ) )');
-      for (const rname of wanted) {
-        P(`    LatticeTemperature( Maximum( Region = "${rname}" ) )`);
+    if (st.output.currentPlot) {
+      const rows = [];
+      if (st.thermal.enabled) {
+        rows.push('    LatticeTemperature( Maximum( Material = "Silicon" )');
+        rows.push('                        Average( Material = "Silicon" ) )');
+        for (const rname of currentPlotRegions(regions, devs)) {
+          rows.push(`    LatticeTemperature( Maximum( Region = "${rname}" ) )`);
+        }
+        if (st.thermal.heatFlux) {
+          rows.push('    TotalHeat( Integrate( Material = "Silicon" ) )');
+        }
       }
-      P('}');
-      P('');
+      /* Without self-heating there is nothing thermal to log, but the .plt
+         is still worth writing: it is where the I-V curves come from. */
+      if (rows.length) {
+        P('CurrentPlot {');
+        for (const r of rows) P(r);
+        P('}');
+        P('');
+      }
     }
 
     /* ---------------- Math ---------------- */
@@ -442,8 +478,10 @@
     P(...solveBlock(st, devs));
 
     /* ---------------- extraction notes ---------------- */
-    P('');
-    P(...extractionNotes(st, devs));
+    if (st.output.extraction) {
+      P('');
+      P(...extractionNotes(st, devs));
+    }
 
     return L.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n';
   }
@@ -469,10 +507,11 @@
 
   function sweep(goalName, voltage, st, indent) {
     const i = indent || '    ';
+    const step = (st.bias && st.bias.vgStep) || 0.02;
     return [
       `${i}Quasistationary(`,
-      `${i}    InitialStep = 0.01  Increment = 1.2`,
-      `${i}    MinStep = 1.0e-6    MaxStep = 0.01`,
+      `${i}    InitialStep = ${step}  Increment = 1.2`,
+      `${i}    MinStep = 1.0e-6    MaxStep = ${step}`,
       `${i}    Goal { Name = "${goalName}"  Voltage = ${voltage} }`,
       `${i}){ ${coupledSet(st)} }`,
       '',
@@ -487,6 +526,13 @@
     L.push('');
     L.push('*   ---- equilibrium ----');
     L.push('    NewCurrentPrefix = "init_"');
+    /* Any electrode the user gave a non-zero starting potential is ramped
+       to it before equilibrium. The names come from the SCM, so this works
+       for whatever electrodes the structure actually declares. */
+    for (const [name, v] of Object.entries(b.initial || {})) {
+      if (!v) continue;
+      L.push(`    Set( "${name}" = ${Number(v).toFixed(3)} )`);
+    }
     L.push('    Coupled( Iterations = 100 ) { Poisson }');
     L.push('    Coupled                    { Poisson Electron Hole }');
     if (st.thermal.enabled) {

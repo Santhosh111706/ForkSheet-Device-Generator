@@ -310,14 +310,23 @@ body.resizing iframe { pointer-events: none; }
   text-overflow: ellipsis;
 }
 .section-head:hover h2 { color: var(--fg); }
+/* The glyph IS the state: the arrow is generated content driven by the
+   card's own class, so it can never fall out of step with what the panel
+   is doing. A rotated triangle looked the same but had to be kept in sync
+   by whoever toggled the class. */
 .chev {
   margin-left: auto;
   flex: 0 0 auto;
-  width: 0; height: 0;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 6px solid var(--fg-dim);
-  transition: transform .15s;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--fg-dim);
+}
+.chev::before { content: '▼'; }          /* expanded: down arrow */
+.card.collapsed .chev::before { content: '▶'; }  /* collapsed: right arrow */
+.section-head:hover .chev { color: var(--fg); }
+.section-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 /* a header that only labels its card; nothing to click, nothing to fold */
 .section-head.static { cursor: default; }
@@ -330,7 +339,6 @@ body.resizing iframe { pointer-events: none; }
 .actions-card .section-head { background: var(--bg-3); }
 .actions-card .section-head h2 { color: var(--fg); }
 
-.card.collapsed .chev { transform: rotate(-90deg); }
 .card.collapsed .section-body { display: none; }
 
 .section-body { padding: 12px; }
@@ -1277,4 +1285,21 @@ body.script-expanded #scm-section { max-height: none; flex: 1 1 auto; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
   .sidebar { scroll-behavior: auto; }
+}
+
+/* the fine-to-coarse band under the SDevice mesh slider */
+.scale-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.scale-row #sdev-mesh-band {
+  color: var(--accent);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
 }

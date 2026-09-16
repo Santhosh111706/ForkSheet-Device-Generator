@@ -1442,12 +1442,6 @@ function initGenerator() {
       .catch(() => setStatus('warn', 'Clipboard blocked by the browser', ['use Download instead']));
   });
 
-  // .static headers are labels, not toggles - the Generate card has one so
-  // its buttons are clearly their own section and not part of the card above
-  $$('.section-head:not(.static)').forEach((h) => {
-    h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed'));
-  });
-
   $('#mesh-prefix-custom').disabled = true;
   onModeChange();
 
@@ -1761,6 +1755,67 @@ function closeDrawers() {
   for (const side of ['left', 'right']) setPanelVisible(side, false);
 }
 
+/**
+ * Every collapsible card, in both windows, from one delegated listener.
+ *
+ * There used to be two loops that each did `addEventListener` over
+ * `.section-head:not(.static)`: one for the page and one for the SDevice
+ * window. The page selector is document-wide, so it already matched the
+ * SDevice headers - every click ran both handlers, the class was toggled
+ * twice, and sections 3 to 7 looked dead because they opened and closed
+ * again within the same click.
+ *
+ * Delegation removes the whole class of bug: there is exactly one listener
+ * no matter how many cards exist or when they are added, so a card can
+ * never be wired twice. The open/closed state stays on the card itself, so
+ * each section keeps its own state and cards do not interfere.
+ *
+ * .static headers are labels, not toggles - the Generate card has one so its
+ * buttons read as their own section rather than part of the card above.
+ */
+function initAccordions() {
+  const cardOf = (ev) => {
+    const head = ev.target.closest('.section-head');
+    if (!head || head.classList.contains('static')) return null;
+    // a control inside the header (the script toolbar) is not a toggle
+    if (ev.target.closest('button, a, input, select, textarea') &&
+        !ev.target.classList.contains('chev')) return null;
+    return head.parentElement;
+  };
+
+  document.addEventListener('click', (ev) => {
+    const card = cardOf(ev);
+    if (!card) return;
+    card.classList.toggle('collapsed');
+    syncHead(card);
+  });
+
+  // a header is a control, so it answers to the keyboard like one
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    const head = ev.target.closest && ev.target.closest('.section-head');
+    if (!head || head.classList.contains('static')) return;
+    if (ev.target !== head) return;
+    ev.preventDefault();
+    head.parentElement.classList.toggle('collapsed');
+    syncHead(head.parentElement);
+  });
+
+  document.querySelectorAll('.section-head:not(.static)').forEach((h) => {
+    h.setAttribute('role', 'button');
+    h.setAttribute('tabindex', '0');
+    syncHead(h.parentElement);
+  });
+}
+
+/** Keep the header's aria state in step with the card's class. */
+function syncHead(card) {
+  if (!card) return;
+  const head = card.querySelector('.section-head');
+  if (!head || head.classList.contains('static')) return;
+  head.setAttribute('aria-expanded', String(!card.classList.contains('collapsed')));
+}
+
 function initPanelToggles() {
   for (const side of ['left', 'right']) {
     const btn = el(PANELS[side].btn);
@@ -1851,6 +1906,7 @@ function initLayout() {
   initResizer('left');
   initResizer('right');
   initPanelToggles();
+  initAccordions();
   initViewportWatchers();
   onModeSwitch();
 }
@@ -2719,7 +2775,43 @@ function sdevFillControls() {
   chk('pl-mobility', st.plot.mobility); chk('pl-bands', st.plot.bands);
   chk('pl-temp', st.plot.temperature);
 
+  chk('ph-surfsrh', st.physics.surfaceSRH);
+  set('ph-bgn', st.physics.bandgapNarrowing);
+  set('ph-tunnel', st.physics.tunneling);
+  set('th-lattice', st.thermal.latticeInit);
+  chk('th-heatflux', st.thermal.heatFlux);
+  set('bi-vgstep', st.bias.vgStep);
+  set('bi-quantity', st.bias.sweepQuantity);
+  set('bi-analysis', st.bias.analysis);
+  set('bi-tend', st.bias.transientEnd);
+  set('bi-tstep', st.bias.transientStep);
+  set('ma-initial', st.math.initialGuess);
+  chk('ou-currentplot', st.output.currentPlot);
+  chk('ou-extract', st.output.extraction);
+  const tr = $('#bi-transient');
+  if (tr) tr.hidden = st.bias.analysis !== 'transient';
+
   set('sdev-mesh', Math.round(st.meshControl.size * 10));
+
+  /* One starting-potential field per electrode the SCM declares. Built from
+     st.bias.initial, whose keys came from the parsed contact names - so a
+     structure with different electrodes gets different fields, and nothing
+     here assumes a source/drain/gate/bulk naming scheme. */
+  const eb = $('#bi-electrodes');
+  if (eb) {
+    const names = Object.keys(st.bias.initial || {});
+    eb.innerHTML = names.length
+      ? names.map((nme) =>
+          '<div class="field compact"><label for="bi-v-' + escapeHtml(nme) + '">' +
+          escapeHtml(nme) + '</label><div class="ctl"><input id="bi-v-' + escapeHtml(nme) +
+          '" type="number" step="0.05" value="' + st.bias.initial[nme] +
+          '"><span class="unit">V</span></div></div>').join('')
+      : '<p class="note">No electrodes found in this structure.</p>';
+    for (const nme of names) {
+      const inp = document.getElementById('bi-v-' + nme);
+      if (inp) inp.addEventListener('input', sdevReadControls);
+    }
+  }
 
   // one workfunction field per gate actually present
   const wf = $('#sdev-wf');
@@ -2756,12 +2848,17 @@ function sdevReadControls() {
   st.physics.srh = on('ph-srh'); st.physics.auger = on('ph-auger');
   st.physics.band2band = on('ph-b2b'); st.physics.avalanche = on('ph-aval');
   st.physics.quantum = on('ph-quantum');
+  st.physics.surfaceSRH = on('ph-surfsrh');
+  const bgn = $('#ph-bgn'); if (bgn) st.physics.bandgapNarrowing = bgn.value;
+  const tun = $('#ph-tunnel'); if (tun) st.physics.tunneling = tun.value;
 
   st.thermal.enabled = on('th-on');
   const sel = $('#th-contact');
   st.thermal.thermode = sel && sel.value ? sel.value : null;
   st.thermal.ambient = num('th-ambient', 300);
   st.thermal.surfaceResistance = num('th-rsurf', 0);
+  st.thermal.latticeInit = num('th-lattice', 300);
+  st.thermal.heatFlux = on('th-heatflux');
   st.temperature = st.thermal.ambient;
 
   st.bias.vdd = num('bi-vdd', 0.75);
@@ -2769,11 +2866,25 @@ function sdevReadControls() {
   st.bias.vgStart = num('bi-vgstart', -0.3);
   st.bias.idvgLin = on('bi-idvglin'); st.bias.idvgSat = on('bi-idvgsat');
   st.bias.idvd = on('bi-idvd');
+  st.bias.vgStep = num('bi-vgstep', 0.02);
+  const sq = $('#bi-quantity'); if (sq) st.bias.sweepQuantity = sq.value;
+  const an = $('#bi-analysis'); if (an) st.bias.analysis = an.value;
+  st.bias.transientEnd = num('bi-tend', 1e-9);
+  st.bias.transientStep = num('bi-tstep', 1e-12);
+  const tr = $('#bi-transient');
+  if (tr) tr.hidden = st.bias.analysis !== 'transient';
+  /* Keyed by the electrode names the SCM actually declares. */
+  for (const name of Object.keys(st.bias.initial || {})) {
+    st.bias.initial[name] = num('bi-v-' + name, 0);
+  }
 
   st.math.digits = num('ma-digits', 5);
   st.math.iterations = num('ma-iter', 25);
   st.math.notdamped = num('ma-notdamped', 100);
   const sm = $('#ma-submethod'); if (sm) st.math.subMethod = sm.value;
+  const ig = $('#ma-initial'); if (ig) st.math.initialGuess = ig.value;
+  st.output.currentPlot = on('ou-currentplot');
+  st.output.extraction = on('ou-extract');
 
   st.plot.field = on('pl-field'); st.plot.carriers = on('pl-carriers');
   st.plot.mobility = on('pl-mobility'); st.plot.bands = on('pl-bands');
@@ -2794,6 +2905,15 @@ function sdevSyncMesh() {
   if (!slider) return;
   const nm = Number(slider.value) / 10;
   if (out) out.textContent = nm.toFixed(1) + ' nm';
+  /* A number alone does not say whether 4 nm is fine or coarse for this
+     structure; the band names where the slider currently sits. */
+  const band = $('#sdev-mesh-band');
+  if (band) {
+    band.textContent = nm <= 1.5 ? 'very fine'
+      : nm <= 3 ? 'fine'
+      : nm <= 6 ? 'moderate'
+      : nm <= 10 ? 'coarse' : 'very coarse';
+  }
   if (sdev.settings) sdev.settings.meshControl.size = nm;
 
   const pre = $('#sdev-mesh-block');
@@ -3044,7 +3164,4 @@ function initSdevice() {
     });
   }
 
-  $$('#sdevice-window .section-head:not(.static)').forEach((h) => {
-    h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed'));
-  });
 }

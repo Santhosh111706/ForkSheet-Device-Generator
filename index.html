@@ -11,7 +11,7 @@
 <!-- Bump ?v= on every edit to css/ or js/. index.html and the scripts are
      cached independently, so a new page paired with an old script silently
      kills init: one missing element and nothing after it runs. -->
-<link rel="stylesheet" href="css/style.css?v=v13-4">
+<link rel="stylesheet" href="css/style.css?v=v13-6">
 
 <!--
   Three.js is loaded as a classic (non-module) script from a CDN.
@@ -701,6 +701,7 @@
                        style="flex:1 1 auto">
                 <span class="unit" id="sdev-mesh-val">2.0 nm</span>
               </div>
+              <div class="scale-row"><span>&#9664; Fine</span><span id="sdev-mesh-band">fine</span><span>Coarse &#9654;</span></div>
               <small>Smaller = finer mesh = higher computational cost. Larger = coarser = cheaper. The bulk and the dielectric are scaled from this, not set to it.</small>
             </div>
             <button id="sdev-mesh-copy" class="btn ghost" type="button" style="width:100%">Copy the SCM refinement block</button>
@@ -720,7 +721,30 @@
             <div class="field"><label class="chk-field"><input type="checkbox" id="ph-auger" checked><span>Recombination: Auger</span></label></div>
             <div class="field"><label class="chk-field"><input type="checkbox" id="ph-b2b"><span>Band2Band (Hurkx) &mdash; GIDL and ambipolar</span></label></div>
             <div class="field"><label class="chk-field"><input type="checkbox" id="ph-aval"><span>Avalanche (vanOverstraeten)</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ph-surfsrh"><span>Interface: SurfaceSRH at the gate dielectric</span></label></div>
             <div class="field"><label class="chk-field"><input type="checkbox" id="ph-quantum"><span>Quantum potential correction</span></label></div>
+            <div class="grid2">
+              <div class="field compact">
+                <label for="ph-bgn">Bandgap narrowing</label>
+                <div class="ctl">
+                  <select id="ph-bgn">
+                    <option value="Slotboom">Slotboom</option>
+                    <option value="Bennett">Bennett</option>
+                    <option value="">off</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field compact">
+                <label for="ph-tunnel">Barrier tunnelling</label>
+                <div class="ctl">
+                  <select id="ph-tunnel">
+                    <option value="">off</option>
+                    <option value="NonlocalPath">NonlocalPath</option>
+                    <option value="Schenk">Schenk</option>
+                  </select>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -744,8 +768,14 @@
               <div class="field compact">
                 <label for="th-rsurf">Surface resistance</label>
                 <div class="ctl"><input id="th-rsurf" type="number" step="0.001" value="0"><span class="unit">cm2K/W</span></div>
+                <small>0 = ideal isothermal boundary. Above 0 makes the thermode resistive.</small>
+              </div>
+              <div class="field compact">
+                <label for="th-lattice">Initial lattice temperature</label>
+                <div class="ctl"><input id="th-lattice" type="number" step="1" value="300"><span class="unit">K</span></div>
               </div>
             </div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="th-heatflux" checked><span>Log integrated heat as well as temperature</span></label></div>
           </div>
         </div>
 
@@ -770,6 +800,47 @@
             <div class="field"><label class="chk-field"><input type="checkbox" id="bi-idvglin" checked><span>ID-VG at linear VDS</span></label></div>
             <div class="field"><label class="chk-field"><input type="checkbox" id="bi-idvgsat" checked><span>ID-VG at saturation VDS</span></label></div>
             <div class="field"><label class="chk-field"><input type="checkbox" id="bi-idvd" checked><span>ID-VD output characteristic</span></label></div>
+            <div class="grid2">
+              <div class="field compact">
+                <label for="bi-vgstep">Sweep step</label>
+                <div class="ctl"><input id="bi-vgstep" type="number" step="0.005" value="0.02"><span class="unit">V</span></div>
+              </div>
+              <div class="field compact">
+                <label for="bi-quantity">Sweep quantity</label>
+                <div class="ctl">
+                  <select id="bi-quantity">
+                    <option value="voltage">Voltage</option>
+                    <option value="current">Current</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field compact">
+                <label for="bi-analysis">Analysis</label>
+                <div class="ctl">
+                  <select id="bi-analysis">
+                    <option value="quasistationary">Quasistationary</option>
+                    <option value="transient">Transient</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div id="bi-transient" hidden>
+              <div class="grid2">
+                <div class="field compact">
+                  <label for="bi-tend">Transient end</label>
+                  <div class="ctl"><input id="bi-tend" type="number" step="1e-10" value="1e-9"><span class="unit">s</span></div>
+                </div>
+                <div class="field compact">
+                  <label for="bi-tstep">Transient step</label>
+                  <div class="ctl"><input id="bi-tstep" type="number" step="1e-13" value="1e-12"><span class="unit">s</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="field" style="margin-top:8px">
+              <label>Starting potential per electrode</label>
+              <div id="bi-electrodes"><p class="note">Analyze a structure to list its electrodes.</p></div>
+              <small>Electrode names come from the loaded SCM, not from a fixed list.</small>
+            </div>
             <div id="sdev-wf"></div>
           </div>
         </div>
@@ -806,6 +877,19 @@
             <div class="field"><label class="chk-field"><input type="checkbox" id="pl-mobility" checked><span>Plot mobility and velocity</span></label></div>
             <div class="field"><label class="chk-field"><input type="checkbox" id="pl-bands" checked><span>Plot band edges</span></label></div>
             <div class="field"><label class="chk-field"><input type="checkbox" id="pl-temp" checked><span>Plot temperature and heat</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ou-currentplot" checked><span>Write the CurrentPlot (.plt) log</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ou-extract" checked><span>Append the parameter-extraction notes</span></label></div>
+            <div class="grid2">
+              <div class="field compact">
+                <label for="ma-initial">Initial guess</label>
+                <div class="ctl">
+                  <select id="ma-initial">
+                    <option value="zero">Zero bias</option>
+                    <option value="previous">Previous solution</option>
+                  </select>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -848,10 +932,10 @@
   SCM Device Viewer &middot; no server, no build step
 </footer>
 
-<script src="js/preview.js?v=v13-4"></script>
-<script src="js/sde-parser.js?v=v13-4"></script>
-<script src="js/analyze.js?v=v13-4"></script>
-<script src="js/sdevice.js?v=v13-4"></script>
-<script src="js/generator.js?v=v13-4"></script>
+<script src="js/preview.js?v=v13-6"></script>
+<script src="js/sde-parser.js?v=v13-6"></script>
+<script src="js/analyze.js?v=v13-6"></script>
+<script src="js/sdevice.js?v=v13-6"></script>
+<script src="js/generator.js?v=v13-6"></script>
 </body>
 </html>
