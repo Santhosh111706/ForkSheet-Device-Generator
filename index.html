@@ -197,6 +197,10 @@
             <div class="ctl"><input id="T_FORK" type="number" step="0.001" min="0.002" value="0.008"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
+            <label for="T_IL">T_IL &mdash; interfacial SiO<sub>2</sub></label>
+            <div class="ctl"><input id="T_IL" type="number" step="0.0001" value="0.0008"><span class="unit">&micro;m</span></div>
+          </div>
+          <div class="field compact">
             <label for="T_HFO2">T_HFO2 &mdash; HfO<sub>2</sub> collar</label>
             <div class="ctl"><input id="T_HFO2" type="number" step="0.001" value="0.002"><span class="unit">&micro;m</span></div>
           </div>
@@ -213,12 +217,12 @@
             <div class="ctl"><input id="T_BRIDGE" type="number" step="0.001" value="0.010"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
-            <label for="T_SUB">T_SUB &mdash; substrate depth</label>
-            <div class="ctl"><input id="T_SUB" type="number" step="0.01" value="0.150"><span class="unit">&micro;m</span></div>
+            <label for="T_DOMAIN">T_DOMAIN &mdash; thermal domain depth</label>
+            <div class="ctl"><input id="T_DOMAIN" type="number" step="0.01" value="0.200"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="T_WELL">T_WELL &mdash; well depth</label>
-            <div class="ctl"><input id="T_WELL" type="number" step="0.01" value="0.100"><span class="unit">&micro;m</span></div>
+            <div class="ctl"><input id="T_WELL" type="number" step="0.01" value="0.050"><span class="unit">&micro;m</span></div>
           </div>
           <div class="field compact">
             <label for="MESH_MIN_X">MESH_MIN_X</label>
@@ -242,47 +246,42 @@
       <div class="section-body">
         <p class="note">
           Active concentrations in cm<sup>&minus;3</sup>, written straight into the
-          profile definitions. Each one is bound to named regions, so a change
-          follows the geometry rather than a coordinate window.
+          profile definitions and bound to named regions. The channel value is
+          shared by both devices, as are the extension and pad values &mdash; the
+          species differ, the magnitudes do not.
         </p>
         <div class="grid2">
           <div class="field compact">
-            <label for="D_BULK">Substrate bulk &mdash; Boron</label>
-            <div class="ctl"><input id="D_BULK" type="number" step="1e16" value="1e17"></div>
+            <label for="N_SUB">N_sub &mdash; substrate, Boron</label>
+            <div class="ctl"><input id="N_SUB" type="number" step="1e16" value="3e17"></div>
           </div>
           <div class="field compact">
-            <label for="D_PWELL">p-well &mdash; Boron</label>
-            <div class="ctl"><input id="D_PWELL" type="number" step="1e16" value="1e17"></div>
+            <label for="N_WELLP">N_wellP &mdash; nFET body, Boron</label>
+            <div class="ctl"><input id="N_WELLP" type="number" step="1e17" value="3e18"></div>
           </div>
           <div class="field compact">
-            <label for="D_NWELL">n-well &mdash; Phosphorus</label>
-            <div class="ctl"><input id="D_NWELL" type="number" step="1e16" value="1e17"></div>
+            <label for="N_WELLN">N_wellN &mdash; pFET body, Phosphorus</label>
+            <div class="ctl"><input id="N_WELLN" type="number" step="1e17" value="3e18"></div>
           </div>
           <div class="field compact">
-            <label for="D_NCHAN">nMOS channel &mdash; Boron</label>
-            <div class="ctl"><input id="D_NCHAN" type="number" step="1e16" value="3e17"></div>
+            <label for="N_CHAN">N_chan &mdash; channel</label>
+            <div class="ctl"><input id="N_CHAN" type="number" step="1e15" value="1e16"></div>
           </div>
           <div class="field compact">
-            <label for="D_NEXT">nMOS extension &mdash; Arsenic</label>
-            <div class="ctl"><input id="D_NEXT" type="number" step="1e18" value="5e19"></div>
+            <label for="N_EXT">N_ext &mdash; extensions</label>
+            <div class="ctl"><input id="N_EXT" type="number" step="1e18" value="5e19"></div>
           </div>
           <div class="field compact">
-            <label for="D_NSD">nMOS S/D &mdash; Arsenic</label>
-            <div class="ctl"><input id="D_NSD" type="number" step="1e18" value="1e20"></div>
-          </div>
-          <div class="field compact">
-            <label for="D_PCHAN">pMOS channel &mdash; Phosphorus</label>
-            <div class="ctl"><input id="D_PCHAN" type="number" step="1e16" value="3e17"></div>
-          </div>
-          <div class="field compact">
-            <label for="D_PEXT">pMOS extension &mdash; Boron</label>
-            <div class="ctl"><input id="D_PEXT" type="number" step="1e18" value="5e19"></div>
-          </div>
-          <div class="field compact">
-            <label for="D_PSD">pMOS S/D &mdash; Boron</label>
-            <div class="ctl"><input id="D_PSD" type="number" step="1e18" value="1e20"></div>
+            <label for="N_SD">N_sd &mdash; source/drain pads</label>
+            <div class="ctl"><input id="N_SD" type="number" step="1e18" value="1e20"></div>
           </div>
         </div>
+        <small style="display:block;margin-top:8px;color:var(--fg-dim)">
+          The channel is effectively undoped: at 3e17 a 20&times;6&times;30&nbsp;nm channel
+          holds about one dopant atom, so the threshold would be a single-atom
+          lottery. Vt comes from the gate workfunction instead, set in
+          <code>sdevice.cmd</code>.
+        </small>
       </div>
     </div>
 

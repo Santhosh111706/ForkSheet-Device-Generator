@@ -1003,7 +1003,7 @@
           P('Pieces', String(highk.length),
             columns.length ? `${highk.length / Math.max(columns.length, 1)} per column` : ''),
           P('Collar coverage', collarCoverage(highk, columns)),
-          eotParam(uniq(highk.map((r) => r.material))[0], Math.min(...thick)),
+          eotStack(gateStackLayers(regions, columns)),
         ],
       });
     }
@@ -1039,9 +1039,11 @@
         }
         params.push(P('Spacer pieces', String(spacers.length), 'total, both sides'));
       }
-      if (oxide.length) {
-        const liner = oxide.slice().sort((a, b) => span(a, 'y') - span(b, 'y'))[0];
-        params.push(P('Gate liner material', uniq(oxide.map((r) => r.material)).join(', ')));
+      const stackOx = stackOxide(regions);
+      const linerOx = oxide.filter((r) => !stackOx.has(r));
+      if (linerOx.length) {
+        const liner = linerOx.slice().sort((a, b) => span(a, 'y') - span(b, 'y'))[0];
+        params.push(P('Gate liner material', uniq(linerOx.map((r) => r.material)).join(', ')));
         params.push(P('Gate liner thickness', nm(span(liner, 'y')), `region "${liner.name}"`));
       }
       if (params.length) groups.push({ title: 'Spacers, liner, isolation', params });
@@ -1139,14 +1141,32 @@
    * HfO2 can scale the figure.
    */
   const K_VALUES = { HfO2: 25, Al2O3: 9, ZrO2: 25, SiO2: 3.9, Si3N4: 7.5 };
-  function eotParam(material, physical) {
-    const k = K_VALUES[material];
-    if (!k || !Number.isFinite(physical)) {
-      return P('EOT', 'not derivable', `no permittivity known for ${material || 'this material'}`);
+
+  /**
+   * EOT of the whole gate stack, in series.
+   *
+   * A gate-all-around stack is usually two layers: a thin interfacial SiO2
+   * on the silicon with the high-k outside it. Taking only the high-k - as
+   * this did while the structure was single-layer - understates the EOT by
+   * the entire interfacial thickness, and the IL is often the larger of the
+   * two terms. Every layer between channel and metal contributes
+   * t * (3.9 / k).
+   */
+  function eotStack(layers) {
+    if (!layers.length) return P('EOT', 'not derivable', 'no gate dielectric found');
+    let total = 0;
+    const parts = [];
+    for (const [material, t] of layers) {
+      const k = K_VALUES[material];
+      if (!k) {
+        return P('EOT', 'not derivable', `no permittivity known for ${material}`);
+      }
+      total += t * 3.9 / k;
+      parts.push(`${nm(t)} ${material} (k=${k})`);
     }
-    return P('EOT', nm(physical * 3.9 / k),
-      `${nm(physical)} of ${material} at k = ${k}, relative to SiO2 at k = 3.9 ` +
-      `(k is not stored in the SCM)`);
+    return P('EOT', nm(total),
+      parts.join(' + ') + ', in series against SiO2 at k = 3.9; ' +
+      'k is not stored in the SCM');
   }
 
   /**
@@ -1217,15 +1237,27 @@
       const t = Math.min(...highk.map((r) =>
         Math.min(span(r, 'x'), span(r, 'y'), span(r, 'z'))));
       put('T_HFO2', t, 'thinnest high-k slab');
-      // pitch = sheet + two collars + metal, so the metal falls out of it
+
+      /* The collar is the whole dielectric stack, not just the high-k. Any
+         interfacial layer inside it counts towards the pitch as well, so it
+         has to be measured before the metal can be backed out of it. */
+      const stackOx = stackOxide(regions);
+      let t_il = 0;
+      if (stackOx.size) {
+        t_il = Math.min(...[...stackOx].map((r) =>
+          Math.min(span(r, 'x'), span(r, 'y'), span(r, 'z'))));
+        put('T_IL', t_il, 'thinnest interfacial oxide slab');
+      }
       if (c0.bands.length > 1) {
         const pitch = c0.bands[1].y0 - c0.bands[0].y0;
-        put('T_METAL', pitch - (b0.y1 - b0.y0) - 2 * t,
-            'sheet pitch minus the sheet and its two collars');
+        put('T_METAL', pitch - (b0.y1 - b0.y0) - 2 * (t + t_il),
+            'sheet pitch minus the sheet and both full dielectric collars');
       }
     }
 
-    const oxide = regions.filter((r) => /^sio2$/i.test(r.material));
+    const stackOx2 = stackOxide(regions);
+    const oxide = regions.filter((r) =>
+      /^sio2$/i.test(r.material) && !stackOx2.has(r));
     if (oxide.length) {
       const liner = oxide.slice().sort((a, b) => span(a, 'y') - span(b, 'y'))[0];
       put('T_LINER', span(liner, 'y'), `Y thickness of "${liner.name}"`);
@@ -1233,13 +1265,59 @@
 
     const below = regions.filter((r) => r.y0 < -TOL);
     if (below.length) {
-      put('T_SUB', -Math.min(...below.map((r) => r.y0)), 'deepest region below y = 0');
+      put('T_DOMAIN', -Math.min(...below.map((r) => r.y0)), 'deepest region below y = 0');
       const wellBottoms = uniq(below.map((r) => round(r.y0, 9)))
         .filter((v) => v > Math.min(...below.map((r) => r.y0)) + TOL);
       if (wellBottoms.length) put('T_WELL', -Math.max(...wellBottoms), 'well / bulk boundary');
     }
 
     return { params, from, arch, columns };
+  }
+
+  /**
+   * Oxide that belongs to the gate stack, as opposed to the gate liner.
+   *
+   * Told apart by geometry, not by name: the interfacial oxide is built
+   * against the high-k, so it touches it on some face; the liner sits well
+   * away from it. This matters because the interfacial layer is thinner
+   * than the liner, so "the thinnest oxide" - which is what this used to
+   * look for while the stack was single-layer - now finds the wrong one.
+   */
+  function stackOxide(regions) {
+    const hk = regions.filter((r) => /hfo2|al2o3|zro2/i.test(r.material));
+    if (!hk.length) return new Set();
+    const near = (a, b, ax) =>
+      a[ax + '0'] < b[ax + '1'] + TOL && b[ax + '0'] < a[ax + '1'] + TOL;
+    const out = new Set();
+    for (const r of regions) {
+      if (!/^sio2$/i.test(r.material)) continue;
+      if (hk.some((h) => near(r, h, 'x') && near(r, h, 'y') && near(r, h, 'z'))) {
+        out.add(r);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The dielectric layers between channel and gate metal, thinnest first.
+   * Found by geometry: any dielectric region that wraps a channel column
+   * and sits inside the gate window is part of the stack.
+   */
+  function gateStackLayers(regions, columns) {
+    if (!columns.length) return [];
+    const c0 = columns[0];
+    const diel = regions.filter((r) =>
+      /hfo2|sio2|al2o3|zro2/i.test(r.material) &&
+      r.z1 > c0.z0 - 0.05 && r.z0 < c0.z1 + 0.05 &&
+      r.y0 > -TOL &&
+      /_(IL|HfO2|hk|ox)_/i.test(r.name));
+    const byMat = new Map();
+    for (const r of diel) {
+      const t = Math.min(span(r, 'x'), span(r, 'y'), span(r, 'z'));
+      const cur = byMat.get(r.material);
+      if (cur === undefined || t < cur) byMat.set(r.material, t);
+    }
+    return [...byMat.entries()].sort((a, b) => a[1] - b[1]);
   }
 
   /** Is the high-k actually wrapped all the way round each sheet? */

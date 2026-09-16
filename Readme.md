@@ -6,14 +6,17 @@ A **static, browser-only** parametric generator for 3D Forksheet CMOS
 Sentaurus SDE geometry, with a live interactive 3D preview.
 
 It is a direct port of the Python generator `gen_forksheet.py` and emits the
-**V8 baseline** structure. The generated `.scm` files are compatible with the
-SCM Device Viewer project.
+**V13** structure: a two-layer gate stack (interfacial SiO<sub>2</sub> with
+HfO<sub>2</sub> outside it), retrograde P and N wells over a 200 nm device
+domain, a single asymmetric gate bridge per transistor, and an n-well tap so
+the pFET body is not left floating. The generated `.scm` files are compatible
+with the SCM Device Viewer project.
 
 Output is a **step-by-step script** by default: every command written out one
 by one, no comments and no `(define ...)` block - each coordinate is a literal
 number, so every line stands on its own. The order is the order a device is
 built: geometry, doping, contacts, mesh, build. Two structured formats keeping
-the V8 helper procedures and their defines are also available under Generation
+the helper procedures and their defines are also available under Generation
 options. All three describe the same device.
 
 It also **reads** SDE: open an `.scm` file, paste commands, or drag a file onto
@@ -36,8 +39,10 @@ Everything runs in the browser.
   length), `T_SPACER` (spacer thickness), `L_PAD` (source/drain length)
   and `N_SHEETS` (number of nanosheets)
 - All nine fixed design constants exposed under Advanced:
-  `L_PAD`, `T_SPACER`, `L_G`, `T_HFO2`, `T_METAL`, `T_LINER`, `T_BRIDGE`,
-  `T_SUB`, `T_WELL`, plus the three mesh minimums
+  `L_PAD`, `T_SPACER`, `L_G`, `T_IL`, `T_HFO2`, `T_METAL`, `T_LINER`,
+  `T_BRIDGE`, `T_DOMAIN`, `T_WELL`, plus the mesh size control
+- Six doping concentrations as parameters, not constants: `N_SUB`,
+  `N_WELLP`, `N_WELLN`, `N_CHAN`, `N_EXT`, `N_SD`
 - Every dependent coordinate recomputed from those inputs, exactly as the
   Python `compute()` does
 - Full validation: input sanity, mesh-resolution warnings, and eleven
@@ -49,8 +54,11 @@ Everything runs in the browser.
 - Any subset of seven variables can be swept - the six above plus
   `T_FORK` - each with its own value list, with a live case count
 - Mesh prefix `auto` or a fixed custom name
-- Three output formats: step-by-step commands (default), the V8 helper
+- Three output formats: step-by-step commands (default), the helper
   procedures, or those procedures with their comments
+- A mesh size control that rescales every refinement in the emitted script,
+  preserving the ratios between them so the channel, the dielectric
+  interfaces and the source/drain junctions stay finer than the bulk
 - Download the `.scm`, or copy it to the clipboard
 
 **SDevice**
@@ -306,25 +314,33 @@ output. `buildScm()` is still that verbatim emitter. Comment stripping is a
 separate pass in `stripScmComments()`, applied afterwards by `emitScm()`, so
 the annotated text is never altered - only optionally reduced.
 
-Current output, measured across the six reference cases. Every case produces
-88 regions, 5 materials, 7 contacts, 25 doping placements and 23 refinements
-in every format:
+Current output, measured at the default geometry. Every format produces
+110 regions, 5 materials, 8 contacts, 25 doping placements and 31
+refinements:
 
 | format | lines | bytes | defines |
 |---|---|---|---|
-| step-by-step (default) | 194 | ~15000 | 0 |
-| structured | 281 | 11556 | 63 |
-| annotated | 481 | 22918 | 63 |
+| step-by-step (default) | 224 | 18513 | 0 |
+| structured | 323 | 13293 | 71 |
+| annotated | 472 | 20899 | 71 |
 
 The step-by-step script has no define block, so it is shorter in lines than
-the structured one but longer in bytes: each cuboid carries its own literal
-coordinates instead of naming a symbol. It is the same 88 regions either way.
+the annotated one but longer in bytes than the structured one: each cuboid
+carries its own literal coordinates instead of naming a symbol. It is the
+same 110 regions either way.
 
-All thirteen parametric inputs can be recovered from a step-by-step file by
+The region count scales with the sheet count: 54 regions at one nanosheet,
+110 at three, 250 at eight. The structured and annotated formats assume
+three sheets, so any other count falls back to the step-by-step emitter
+rather than emit a define block that disagrees with its own geometry.
+
+All fourteen parametric inputs can be recovered from a step-by-step file by
 measurement alone - `T_NS`, `W_NS`, `T_FORK`, `L_G`, `T_SPACER`, `L_PAD`,
-`N_SHEETS`, `T_HFO2`, `T_METAL`, `T_LINER`, `T_BRIDGE`, `T_SUB`, `T_WELL` -
-checked exactly against the values the generator was given, across several
-cases.
+`N_SHEETS`, `T_IL`, `T_HFO2`, `T_METAL`, `T_LINER`, `T_BRIDGE`, `T_DOMAIN`,
+`T_WELL` - checked exactly against the values the generator was given.
+The interfacial layer and the gate liner are both SiO<sub>2</sub> and the
+interfacial layer is the thinner of the two, so they are told apart by
+geometry: the interfacial oxide is the one built against the high-k.
 
 Equivalence is not asserted, it is checked. The test parses the step-by-step
 output and the annotated output with `window.SDE` and compares the resulting
@@ -423,9 +439,9 @@ what the loaded structure actually contains; it will report STI or raised
 source/drain if a file that has them is loaded, and says nothing about them
 when it is not.
 
-Output from this generator was loaded into the SCM Device Viewer and passed
-all eleven geometry checks: 88 regions, 5 materials, 7 contacts, no overlaps,
-both gates connected.
+Output from this generator was loaded back into its own viewer and passed
+all eleven geometry checks: 110 regions, 5 materials, 8 contacts, no
+overlaps, no gaps, both gates connected, both dielectric collars closed.
 
 ---
 
