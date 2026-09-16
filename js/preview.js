@@ -35,6 +35,9 @@
     showEdges: true,
     showAxes: true,
     showContacts: true,
+    contactFaces: [],             // resolved faces, from SDEAnalyze
+    contactLabels: false,         // names on the faces; off unless asked
+    selectedContact: null,
     colorMode: 'material',        // material | doping | combined
     doping: null,                 // region name -> doping description
     ready: false,
@@ -45,7 +48,7 @@
 
   let renderer, scene, camera, perspCam, orthoCam, controls;
   let modelGroup, regionGroup, edgeGroup, axesGroup, highlight;
-  let contactGroup, flagGroup, measureGroup;
+  let contactGroup, contactLabelGroup, flagGroup, measureGroup;
 
   /* The model is drawn at a uniform scale about its own centre, because a
      device 0.08 um across gives WebGL a useless depth buffer. Every mapping
@@ -191,9 +194,11 @@
     edgeGroup = new THREE.Group();
     axesGroup = new THREE.Group();
     contactGroup = new THREE.Group();
+    contactLabelGroup = new THREE.Group();
     flagGroup = new THREE.Group();
     measureGroup = new THREE.Group();
-    modelGroup.add(regionGroup, edgeGroup, contactGroup, flagGroup, measureGroup);
+    modelGroup.add(regionGroup, edgeGroup, contactGroup, contactLabelGroup,
+                   flagGroup, measureGroup);
     scene.add(modelGroup, axesGroup);
 
     // cross-section: one global plane, enabled only while a section is on
@@ -458,14 +463,62 @@
     pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(pointer, camera);
 
+    /* Contacts are tested first and independently: a contact quad sits just
+       outside the face it covers, so a click on an electrode should select
+       the electrode rather than the silicon a fraction behind it. */
+    if (!S.measure.on && S.showContacts && contactGroup) {
+      const ch = raycaster.intersectObjects(contactGroup.children, false);
+      const hit = ch.find((h) => h.object.userData && h.object.userData.contact);
+      if (hit) { selectContact(hit.object.userData.contact); return; }
+    }
+
     const hits = raycaster.intersectObjects(regionGroup.children, false);
     const region = hits.length ? hits[0].object.userData.region : null;
     if (S.measure.on) { pickForMeasure(region); return; }
     select(region ? region.name : null);
   }
 
+  /** Select a contact: outline its face and fill the inspector from it. */
+  function selectContact(c) {
+    S.selectedContact = c;
+    S.selected = null;
+    highlight.visible = false;
+    rebuildContactHighlight();
+    fillContactInfo(c);
+  }
+
+  /* The selected contact always shows its name, whatever the label setting:
+     that is the "when useful" case - you asked which one this is. */
+  function rebuildContactHighlight() {
+    if (!contactGroup) return;
+    for (const o of contactGroup.children) {
+      const c = o.userData && o.userData.contact;
+      if (!c || !o.material) continue;
+      const on = S.selectedContact && c.name === S.selectedContact.name;
+      if (o.material.opacity !== undefined && o.type === 'Mesh') {
+        o.material.opacity = on ? 0.9 : 0.55;
+      }
+    }
+    disposeChildren(contactLabelGroup);
+    const show = S.contactLabels
+      ? S.contactFaces.filter((c) => c.kind === 'face')
+      : (S.selectedContact ? [S.selectedContact] : []);
+    for (const c of show) {
+      if (!c.rect) continue;
+      const ax = c.rect.axis;
+      const other = ['x', 'y', 'z'].filter((k) => k !== ax);
+      const q = {};
+      q[ax] = c.rect.at;
+      for (const k of other) q[k] = (c.rect[k + '0'] + c.rect[k + '1']) / 2;
+      contactLabelGroup.add(makeLabel(c.name, toWorld([q.x, q.y, q.z]),
+        contactColor(c.name)));
+    }
+  }
+
   function select(name) {
     S.selected = name;
+    // picking a region drops any contact selection, and vice versa
+    if (S.selectedContact) { S.selectedContact = null; rebuildContactHighlight(); }
     if (!name) {
       highlight.visible = false;
       fillInfo(null);
@@ -514,6 +567,60 @@
     }
     ['x0', 'x1', 'y0', 'y1', 'z0', 'z1', 'lx', 'ly', 'lz'].forEach((f) => set(f, fmt(r[f])));
     set('volume', fmt(r.volume));
+  }
+
+  /**
+   * The inspector, filled from a contact instead of a region.
+   *
+   * Reuses the same panel: a contact has a name, a material it sits on, a
+   * position and an extent, which is what the fields already are. The three
+   * doping rows carry the electrode facts that have no region equivalent -
+   * type, which face, and how big it is.
+   */
+  function fillContactInfo(c) {
+    const set = (f, v) => {
+      const el = document.querySelector(`#region-info [data-f="${f}"]`);
+      if (el) el.textContent = v;
+    };
+    const all = ['name', 'material', 'x0', 'x1', 'y0', 'y1', 'z0', 'z1',
+                 'lx', 'ly', 'lz', 'volume', 'dop-type', 'dop-conc', 'dop-profile'];
+    all.forEach((f) => set(f, '-'));
+    if (!c) return;
+
+    set('name', c.name + '  [contact]');
+    set('material', c.material || '-');
+
+    if (c.kind !== 'face') {
+      set('dop-type', c.kind === 'unplaced' ? 'declared, never placed'
+        : c.kind === 'unattached' ? 'pick point is not on any region'
+        : 'pick point is on an edge or corner - ambiguous');
+      if (c.at) {
+        set('x0', fmt(c.at.x)); set('y0', fmt(c.at.y)); set('z0', fmt(c.at.z));
+      }
+      return;
+    }
+
+    const ax = c.rect.axis;
+    const other = ['x', 'y', 'z'].filter((k) => k !== ax);
+    set('dop-type', `face contact, ${c.side === 'max' ? '+' : '-'}${ax} face`);
+    set('dop-conc', (c.area * 1e6).toFixed(1) + ' nm2' +
+      (c.exposed ? '' : ' (buried face)'));
+    set('dop-profile', `on region "${c.region}"`);
+
+    for (const k of ['x', 'y', 'z']) {
+      if (k === ax) { set(k + '0', fmt(c.rect.at)); set(k + '1', fmt(c.rect.at)); }
+      else { set(k + '0', fmt(c.rect[k + '0'])); set(k + '1', fmt(c.rect[k + '1'])); }
+    }
+    set('lx', ax === 'x' ? '0' : fmt(c.rect.x1 - c.rect.x0));
+    set('ly', ax === 'y' ? '0' : fmt(c.rect.y1 - c.rect.y0));
+    set('lz', ax === 'z' ? '0' : fmt(c.rect.z1 - c.rect.z0));
+    set('volume', '-');
+  }
+
+  /** Show every contact name on its face, or only the selected one. */
+  function setContactLabels(on) {
+    S.contactLabels = !!on;
+    rebuildContactHighlight();
   }
 
   /**
@@ -676,55 +783,115 @@
   }
 
   /**
-   * Draw a marker at every contact pick point.
+   * Draw every contact as the FACE it actually is.
    *
-   * A contact in SDE is a face, picked by a point that must land on it. The
-   * marker is therefore drawn AT that point rather than over the whole
-   * region: if a contact is misplaced, the marker is visibly floating in
-   * space or buried inside the structure, which is the failure you want to
-   * be able to see.
+   * SDE's `set-contact-faces` turns a whole region face into the electrode;
+   * the position in the script only picks which face. An earlier version
+   * drew a dot at that pick point with the name on a pin above it, which
+   * showed where the contact was declared but not what it covers - the
+   * electrode's area and orientation, the two things that decide current
+   * and where it is injected, were not on screen at all.
+   *
+   * So each contact is now a coloured quad laid on its real face, lifted off
+   * the surface by a hair so it does not z-fight with the region beneath.
+   * The quad carries the contact in userData, which makes it pickable like
+   * any region. The pick point is still marked, small, because a contact on
+   * the wrong face is only obvious if you can see where it was asked for.
+   *
+   * Anything that did not resolve to a single face - an unplaced set, a pick
+   * that missed every region, a point on an edge - keeps the old marker, so
+   * a broken contact still shows up rather than silently vanishing.
    */
-  function setContacts(list) {
+  function setContacts(list, resolved) {
     if (!S.ready) return;
     disposeChildren(contactGroup);
+    disposeChildren(contactLabelGroup);
+    S.selectedContact = null;
     S.contacts = list || [];
+    S.contactFaces = resolved || [];
     if (!S.contacts.length) return;
 
-    const r = 0.42;
-    /* Contacts cluster on the top face, so labels drawn at a fixed height
-       land on top of each other - on a phone the seven names were a single
-       unreadable pile. Each successive pin is drawn taller, which stacks
-       the labels instead of overlapping them. */
+    const faces = S.contactFaces.filter((c) => c.kind === 'face');
+    for (const c of faces) contactGroup.add(...contactFaceMeshes(c));
+
+    // whatever could not be resolved to a face still gets a marker
+    const broken = S.contactFaces.filter((c) => c.kind !== 'face' && c.at);
     let idx = 0;
-    for (const c of S.contacts) {
+    for (const c of broken) {
       const colour = contactColor(c.name);
-      for (const p of (c.faces || [])) {
-        if (!p) continue;
-        const at = toWorld([p.x, p.y, p.z]);
-        const lift = r * (4 + (idx % 4) * 2.6);
-        idx++;
-
-        const dot = new THREE.Mesh(
-          new THREE.SphereGeometry(r, 16, 12),
-          new THREE.MeshBasicMaterial({ color: colour, depthTest: false }));
-        dot.position.copy(at);
-        dot.renderOrder = 10;
-        dot.userData.contact = c.name;
-        contactGroup.add(dot);
-
-        // a short pin, so the marker reads as attached to a surface
-        const pin = new THREE.Line(
-          new THREE.BufferGeometry().setFromPoints([
-            at.clone(), at.clone().add(new THREE.Vector3(0, lift, 0))]),
-          new THREE.LineBasicMaterial({ color: colour, depthTest: false }));
-        pin.renderOrder = 10;
-        contactGroup.add(pin);
-
-        contactGroup.add(makeLabel(c.name, at.clone().add(
-          new THREE.Vector3(0, lift + r * 1.8, 0)), colour));
-      }
+      const at = toWorld([c.at.x, c.at.y, c.at.z]);
+      const lift = 0.42 * (4 + (idx % 4) * 2.6);
+      idx++;
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.42, 16, 12),
+        new THREE.MeshBasicMaterial({ color: colour, depthTest: false }));
+      dot.position.copy(at);
+      dot.renderOrder = 10;
+      dot.userData.contact = c;
+      contactGroup.add(dot);
+      contactGroup.add(makeLabel(c.name + ' (' + c.kind + ')',
+        at.clone().add(new THREE.Vector3(0, lift, 0)), colour));
     }
     contactGroup.visible = S.showContacts;
+    rebuildContactHighlight();
+    contactLabelGroup.visible = S.showContacts;
+  }
+
+  /** The quad, its outline, its pick-point tick and its label. */
+  function contactFaceMeshes(c) {
+    const colour = contactColor(c.name);
+    const ax = c.rect.axis;
+    const other = ['x', 'y', 'z'].filter((k) => k !== ax);
+    const lo = {}, hi = {};
+    for (const k of other) { lo[k] = c.rect[k + '0']; hi[k] = c.rect[k + '1']; }
+    lo[ax] = hi[ax] = c.rect.at;
+
+    /* Lift the quad off the surface along the face normal, outward, by a
+       fraction of the device size - enough to beat depth precision at any
+       zoom without visibly floating. */
+    const nrm = c.side === 'max' ? 1 : -1;
+    const eps = XF.scale ? (0.35 / XF.scale) : 0.0002;
+    const corner = (u, v) => {
+      const q = {};
+      q[other[0]] = u ? hi[other[0]] : lo[other[0]];
+      q[other[1]] = v ? hi[other[1]] : lo[other[1]];
+      q[ax] = c.rect.at + nrm * eps;
+      return toWorld([q.x, q.y, q.z]);
+    };
+    const p00 = corner(0, 0), p10 = corner(1, 0), p11 = corner(1, 1), p01 = corner(0, 1);
+
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([
+      p00.x, p00.y, p00.z, p10.x, p10.y, p10.z, p11.x, p11.y, p11.z,
+      p00.x, p00.y, p00.z, p11.x, p11.y, p11.z, p01.x, p01.y, p01.z,
+    ], 3));
+    g.computeVertexNormals();
+    const quad = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+      color: colour, transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+      depthWrite: false,
+    }));
+    quad.renderOrder = 8;
+    quad.userData.contact = c;
+
+    const outline = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints([p00, p10, p11, p01]),
+      new THREE.LineBasicMaterial({ color: colour }));
+    outline.renderOrder = 9;
+
+    const mid = p00.clone().add(p11).multiplyScalar(0.5);
+    const out = [quad, outline];
+
+    // the pick point, so a contact declared on the wrong face is visible
+    if (c.at) {
+      const tick = new THREE.Mesh(
+        new THREE.SphereGeometry(0.3, 12, 10),
+        new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      tick.position.copy(toWorld([c.at.x, c.at.y, c.at.z]));
+      tick.renderOrder = 11;
+      tick.userData.contact = c;
+      out.push(tick);
+    }
+    return out;
   }
 
   /** A camera-facing text sprite. */
@@ -760,6 +927,7 @@
   function setShowContacts(on) {
     S.showContacts = !!on;
     if (contactGroup) contactGroup.visible = S.showContacts;
+    if (contactLabelGroup) contactLabelGroup.visible = S.showContacts;
   }
 
   /* ------------------------------------------------- problem highlights */
@@ -949,6 +1117,8 @@
        the camera aspect ratio, so this has to be explicit. */
     resize: onResize,
     setContacts,
+    setContactLabels,
+    selectContact,
     setShowContacts,
     setColorMode,
     setDoping,

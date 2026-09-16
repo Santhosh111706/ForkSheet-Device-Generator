@@ -72,6 +72,104 @@
     return ox > -TOL && oy > -TOL && oz > -TOL;
   }
 
+  /**
+   * Resolve every contact pick point to the actual FACE it lands on.
+   *
+   * `(sdegeo:set-contact-faces (find-face-id (position x y z)) "name")` names
+   * a face by a point that has to lie on it. SDE then makes that whole face
+   * the electrode - so a contact is a rectangle on a region boundary, not a
+   * point, and drawing it as a dot or a text label throws away both its area
+   * and its orientation.
+   *
+   * The point is on a face when exactly one of its coordinates sits on one of
+   * the region's six bounds while the other two are inside. That single axis
+   * is the face normal; the face itself spans the region's full extent in the
+   * other two axes.
+   *
+   * A point on an edge or a corner matches two or three axes at once and is
+   * ambiguous; those are reported with axis null so the caller can fall back
+   * to a marker and the checker can flag them.
+   */
+  function resolveContacts(regions, contacts) {
+    const out = [];
+    for (const c of (contacts || [])) {
+      const pts = (c.faces || []).filter(Boolean);
+      if (!pts.length) {
+        out.push({ name: c.name, kind: 'unplaced', at: null, region: null,
+                   axis: null, side: null, rect: null, area: 0 });
+        continue;
+      }
+      for (const p of pts) {
+        const owners = regions.filter((r) => contains(r, p));
+        if (!owners.length) {
+          out.push({ name: c.name, kind: 'unattached', at: p, region: null,
+                     axis: null, side: null, rect: null, area: 0 });
+          continue;
+        }
+        /* Several regions can share the face the point lies on. Prefer the
+           one whose face is actually exposed, then the larger of them. */
+        let best = null;
+        for (const r of owners) {
+          const hits = [];
+          for (const ax of ['x', 'y', 'z']) {
+            if (Math.abs(p[ax] - r[ax + '0']) < TOL) hits.push([ax, 'min']);
+            if (Math.abs(p[ax] - r[ax + '1']) < TOL) hits.push([ax, 'max']);
+          }
+          if (hits.length !== 1) continue;
+          const [axis, side] = hits[0];
+          const cand = { region: r, axis, side,
+                         exposed: faceIsExposed(regions, r, axis, side) };
+          if (!best || (cand.exposed && !best.exposed) ||
+              (cand.exposed === best.exposed && volumeOf(r) > volumeOf(best.region))) {
+            best = cand;
+          }
+        }
+        if (!best) {
+          out.push({ name: c.name, kind: 'ambiguous', at: p,
+                     region: owners[0].name, axis: null, side: null,
+                     rect: null, area: 0 });
+          continue;
+        }
+        const r = best.region, ax = best.axis;
+        const at = best.side === 'min' ? r[ax + '0'] : r[ax + '1'];
+        const other = ['x', 'y', 'z'].filter((k) => k !== ax);
+        const rect = { axis: ax, at };
+        for (const k of other) { rect[k + '0'] = r[k + '0']; rect[k + '1'] = r[k + '1']; }
+        const area = (rect[other[0] + '1'] - rect[other[0] + '0']) *
+                     (rect[other[1] + '1'] - rect[other[1] + '0']);
+        out.push({ name: c.name, kind: 'face', at: p, region: r.name,
+                   material: r.material, axis: ax, side: best.side,
+                   exposed: best.exposed, rect, area });
+      }
+    }
+    return out;
+  }
+
+  /** Is this face of this region open, or is a neighbour sitting on it? */
+  function faceIsExposed(regions, r, axis, side) {
+    const at = side === 'min' ? r[axis + '0'] : r[axis + '1'];
+    const other = ['x', 'y', 'z'].filter((k) => k !== axis);
+    let covered = 0;
+    const total = (r[other[0] + '1'] - r[other[0] + '0']) *
+                  (r[other[1] + '1'] - r[other[1] + '0']);
+    for (const q of regions) {
+      if (q === r) continue;
+      const meets = side === 'min' ? Math.abs(q[axis + '1'] - at) < TOL
+                                   : Math.abs(q[axis + '0'] - at) < TOL;
+      if (!meets) continue;
+      let a = 1;
+      for (const k of other) {
+        a *= Math.max(0, Math.min(r[k + '1'], q[k + '1']) - Math.max(r[k + '0'], q[k + '0']));
+      }
+      covered += a;
+    }
+    return covered < total * 0.5;
+  }
+
+  function volumeOf(r) {
+    return (r.x1 - r.x0) * (r.y1 - r.y0) * (r.z1 - r.z0);
+  }
+
   /** Smallest axis gap between two boxes; 0 if they touch or overlap. */
   function gapBetween(a, b) {
     const g = (lo1, hi1, lo2, hi2) => Math.max(lo1 - hi2, lo2 - hi1, 0);
@@ -101,20 +199,22 @@
   const DONORS = /phosphorus|arsenic|antimony|nitrogen/i;
   const ACCEPTORS = /boron|aluminum|aluminium|gallium|indium/i;
 
-  /* Classes and the colours the viewer paints them. n-type blue, p-type
-     red, darker with increasing concentration - the usual TCAD reading. */
+  /* Classes and the colours the viewer paints them: n-type RED, p-type
+     BLUE, darker with increasing concentration so N+ reads as stronger
+     than N at a glance. The two families are opposite ends of the wheel,
+     so the junction between them is the most visible line in the view. */
   const DOPING_CLASSES = [
-    { id: 'Nplus',  label: 'N+', color: '#0d47a1', min: 1e19, type: 'n',
+    { id: 'Nplus',  label: 'N+', color: '#b71c1c', min: 1e19, type: 'n',
       range: '>= 1e19 cm^-3' },
-    { id: 'N',      label: 'N',  color: '#42a5f5', min: 1e16, type: 'n',
+    { id: 'N',      label: 'N',  color: '#ef5350', min: 1e16, type: 'n',
       range: '1e16 - 1e19 cm^-3' },
-    { id: 'Nminus', label: 'N-', color: '#b3e5fc', min: 0,    type: 'n',
+    { id: 'Nminus', label: 'N-', color: '#ffcdd2', min: 0,    type: 'n',
       range: '< 1e16 cm^-3' },
-    { id: 'Pplus',  label: 'P+', color: '#b71c1c', min: 1e19, type: 'p',
+    { id: 'Pplus',  label: 'P+', color: '#0d47a1', min: 1e19, type: 'p',
       range: '>= 1e19 cm^-3' },
-    { id: 'P',      label: 'P',  color: '#ef5350', min: 1e16, type: 'p',
+    { id: 'P',      label: 'P',  color: '#42a5f5', min: 1e16, type: 'p',
       range: '1e16 - 1e19 cm^-3' },
-    { id: 'Pminus', label: 'P-', color: '#ffcdd2', min: 0,    type: 'p',
+    { id: 'Pminus', label: 'P-', color: '#b3e5fc', min: 0,    type: 'p',
       range: '< 1e16 cm^-3' },
   ];
   const UNDOPED = { id: 'undoped', label: 'undoped', color: '#5a636e',
@@ -721,7 +821,25 @@
         P('Gate metal pieces', String(metal.length), uniq(metal.map((r) => r.material)).join(', ')),
         P('Gate metal volume', round(metal.reduce((a, r) =>
           a + span(r, 'x') * span(r, 'y') * span(r, 'z'), 0), 4) + ' µm³'),
+        P('Gate width (Z)', nm(Math.max(...metal.map((r) => span(r, 'z')))),
+          'widest gate metal piece across the sheet'),
       ];
+      /* The gate metal appears at three thicknesses: the slabs between
+         sheets, the bottom and top slabs, and the bridge that joins them
+         down the open side. Reporting only one of them hides the stack. */
+      {
+        const ys = metal.map((r) => round(span(r, 'y'), 9));
+        const zs = metal.map((r) => round(span(r, 'z'), 9));
+        params.push(P('Gate metal thickness', nm(Math.min(...ys)),
+          'thinnest slab; inter-sheet fill'));
+        const bridge = metal.filter((r) => span(r, 'y') > Math.min(...ys) * 1.5);
+        if (bridge.length) {
+          params.push(P('Gate bridge thickness', nm(Math.min(...bridge.map((r) => span(r, 'z')))),
+            `${bridge.length} piece(s) joining the slabs down the open Z side`));
+          params.push(P('Gate bridge height', nm(Math.max(...bridge.map((r) => span(r, 'y')))),
+            'spans the whole sheet stack'));
+        }
+      }
       // per-column gate envelope in Z
       for (const [i, c] of columns.entries()) {
         const env = metal.filter((r) => r.z1 > c.z0 - 0.05 && r.z0 < c.z1 + 0.05);
@@ -764,6 +882,30 @@
         if (widest.length > 1) {
           params.push(P(`Column ${i + 1}: sheet segments`, String(widest.length),
             widest.map((r) => r.name).join(' | ')));
+          /* The gated middle segment is the channel; the outer two are the
+             source and drain extensions. Their lengths are separate design
+             parameters and were not being reported at all. */
+          const mid = widest[Math.floor(widest.length / 2)];
+          params.push(P(`Column ${i + 1}: channel length`, nm(span(mid, 'x')),
+            `gated segment "${mid.name}"`));
+          if (widest.length >= 3) {
+            params.push(P(`Column ${i + 1}: extension length`,
+              nm(span(widest[0], 'x')),
+              `source side; drain side ${nm(span(widest[widest.length - 1], 'x'))}`));
+          }
+          params.push(P(`Column ${i + 1}: channel cross-section`,
+            `${nm(span(mid, 'z'))} x ${nm(span(mid, 'y'))}`,
+            'width x thickness, the conducting cross-section'));
+        }
+      }
+      /* Lateral spacing: sheet to sheet across the fork, which is what the
+         wall thickness plus the two dielectric stacks actually buys. */
+      if (columns.length > 1) {
+        const sorted = columns.slice().sort((a, b2) => a.z0 - b2.z0);
+        for (let i = 1; i < sorted.length; i++) {
+          params.push(P(`Lateral sheet spacing ${i}-${i + 1}`,
+            nm(sorted[i].z0 - sorted[i - 1].z1),
+            'channel edge to channel edge across the fork wall'));
         }
       }
       groups.push({ title: 'Channel / nanosheets', params });
@@ -783,16 +925,45 @@
           if (!set.length) return null;
           const x0 = Math.min(...set.map((r) => r.x0)), x1 = Math.max(...set.map((r) => r.x1));
           const y0 = Math.min(...set.map((r) => r.y0)), y1 = Math.max(...set.map((r) => r.y1));
-          return { x0, x1, y0, y1 };
+          const z0 = Math.min(...set.map((r) => r.z0)), z1 = Math.max(...set.map((r) => r.z1));
+          const vol = set.reduce((a, r) =>
+            a + span(r, 'x') * span(r, 'y') * span(r, 'z'), 0);
+          return { x0, x1, y0, y1, z0, z1, vol, n: set.length };
+        };
+        /* Length, height and width are three separate design parameters and
+           the pad volume is what actually sets series resistance, so all
+           four are reported rather than just the X window. */
+        const padRows = (tag, b2) => {
+          params.push(P(tag + ' length', nm(b2.x1 - b2.x0), 'along transport (X)'));
+          params.push(P(tag + ' height', nm(b2.y1 - b2.y0), `${round(b2.y0)} .. ${round(b2.y1)} in Y`));
+          params.push(P(tag + ' width', nm(b2.z1 - b2.z0), `${round(b2.z0)} .. ${round(b2.z1)} in Z`));
+          params.push(P(tag + ' volume', round(b2.vol, 6) + ' µm³',
+            `${b2.n} region(s)`));
         };
         const s = pad(src), d = pad(drn);
+        /* A forksheet has two of everything side by side in Z. Measuring
+           the envelope of both pads at once reports the whole device width
+           as "source width", which is not a pad dimension at all - so each
+           pad is measured against the column it belongs to. */
+        const perColumn = (set, tag) => {
+          if (!columns.length) return false;
+          let any = false;
+          for (const [i, c] of columns.entries()) {
+            const own = set.filter((r) => r.z1 > c.z0 - TOL && r.z0 < c.z1 + TOL);
+            const b2 = pad(own);
+            if (!b2) continue;
+            any = true;
+            padRows(`${tag} ${i + 1}`, b2);
+          }
+          return any;
+        };
         if (s) {
           params.push(P('Source X window', `${round(s.x0)} .. ${round(s.x1)}`, `length ${nm(s.x1 - s.x0)}`));
-          params.push(P('Source height', nm(s.y1 - s.y0), `${round(s.y0)} .. ${round(s.y1)}`));
+          if (!perColumn(src, 'Source')) padRows('Source', s);
         }
         if (d) {
           params.push(P('Drain X window', `${round(d.x0)} .. ${round(d.x1)}`, `length ${nm(d.x1 - d.x0)}`));
-          params.push(P('Drain height', nm(d.y1 - d.y0), `${round(d.y0)} .. ${round(d.y1)}`));
+          if (!perColumn(drn, 'Drain')) padRows('Drain', d);
         }
         // extension = semiconductor between the pad edge and the gate edge
         const pads = uniq(semi.map((r) => round(r.x1, 9))).sort((a, b) => a - b);
@@ -800,6 +971,16 @@
         if (padEdge !== undefined) {
           params.push(P('S/D extension length', nm(gx[0] - padEdge),
             `pad edge ${round(padEdge)} to gate edge ${round(gx[0])}`));
+          /* The extension carries the same cross-section as the sheet it
+             continues, which is what its series resistance depends on. */
+          const ext = semi.filter((r) => r.x1 <= gx[0] + TOL && r.x0 >= padEdge - TOL &&
+            span(r, 'x') < (gx[1] - gx[0]) && r.y0 > 0);
+          if (ext.length) {
+            params.push(P('S/D extension cross-section',
+              `${nm(Math.min(...ext.map((r) => span(r, 'z'))))} x ` +
+              `${nm(Math.min(...ext.map((r) => span(r, 'y'))))}`,
+              `width x thickness, ${ext.length} extension region(s) per side`));
+          }
         }
         params.push(P('Junction plane, source side', round(gx[0], 6) + ' µm',
           'doping changes at the gate edge'));
@@ -866,6 +1047,13 @@
         if (wellTops.length) {
           params.push(P('Substrate top', round(Math.max(...wellTops), 6) + ' µm'));
         }
+        const sx0 = Math.min(...sub.map((r) => r.x0)), sx1 = Math.max(...sub.map((r) => r.x1));
+        const sz0 = Math.min(...sub.map((r) => r.z0)), sz1 = Math.max(...sub.map((r) => r.z1));
+        params.push(P('Substrate length (X)', nm(sx1 - sx0), `${round(sx0)} .. ${round(sx1)}`));
+        params.push(P('Substrate width (Z)', nm(sz1 - sz0), `${round(sz0)} .. ${round(sz1)}`));
+        params.push(P('Substrate volume',
+          round(sub.reduce((a, r) => a + span(r, 'x') * span(r, 'y') * span(r, 'z'), 0), 6) + ' µm³',
+          'thermal domain, not a wafer thickness'));
       }
       if (params.length) groups.push({ title: 'Source / drain, junctions, substrate', params });
     }
@@ -1003,6 +1191,7 @@
           P('Pieces', String(highk.length),
             columns.length ? `${highk.length / Math.max(columns.length, 1)} per column` : ''),
           P('Collar coverage', collarCoverage(highk, columns)),
+          ...stackRows(regions, columns),
           eotStack(gateStackLayers(regions, columns)),
         ],
       });
@@ -1037,6 +1226,41 @@
           params.push(P('Spacer thickness', nm(Math.min(...th)),
             `${left.length} piece(s) source side, ${right.length} drain side`));
         }
+        const both = [...left, ...right];
+        if (both.length) {
+          params.push(P('Spacer height', nm(Math.max(...both.map((r) => span(r, 'y')))),
+            'tallest spacer piece, liner to device top'));
+          params.push(P('Spacer width (Z)', nm(Math.max(...both.map((r) => span(r, 'z')))),
+            'widest spacer piece across the sheet'));
+          /* Inner spacers are the ones that sit inside a channel column in
+             Z - they fill the gaps between the sheets and are what a real
+             GAA inner-spacer module forms. Everything else is an outer
+             spacer running down the side of the stack. Classifying by Z
+             POSITION, not by Z extent: the inner pieces span the full
+             channel width, so "narrower" picks out the wrong set. */
+          const inColumn = (r) => columns.some((c) =>
+            r.z0 > c.z0 - TOL && r.z1 < c.z1 + TOL);
+          const inner = both.filter(inColumn);
+          const outer = both.filter((r) => !inColumn(r));
+          if (inner.length) {
+            params.push(P('Inner spacer dimensions',
+              `${nm(Math.min(...inner.map((r) => span(r, 'x'))))} x ` +
+              `${nm(Math.min(...inner.map((r) => span(r, 'y'))))} x ` +
+              `${nm(Math.max(...inner.map((r) => span(r, 'z'))))}`,
+              `${inner.length} piece(s), thickness x height x width; between the sheets`));
+            params.push(P('Inner spacer height range',
+              `${nm(Math.min(...inner.map((r) => span(r, 'y'))))} .. ` +
+              `${nm(Math.max(...inner.map((r) => span(r, 'y'))))}`,
+              'the sheet gaps they fill differ at the bottom and top of the stack'));
+          }
+          if (outer.length) {
+            params.push(P('Outer spacer dimensions',
+              `${nm(Math.min(...outer.map((r) => span(r, 'x'))))} x ` +
+              `${nm(Math.max(...outer.map((r) => span(r, 'y'))))} x ` +
+              `${nm(Math.max(...outer.map((r) => span(r, 'z'))))}`,
+              `${outer.length} piece(s), thickness x height x width; beside the stack`));
+          }
+        }
         params.push(P('Spacer pieces', String(spacers.length), 'total, both sides'));
       }
       const stackOx = stackOxide(regions);
@@ -1053,11 +1277,18 @@
     {
       const params = [];
       const byName = new Map((parsed.profiles || []).map((p) => [p.name, p]));
+      const map = dopingMap(parsed);
       for (const d of (parsed.doping || [])) {
         const prof = byName.get(d.profile);
         const species = prof ? String(prof.field).replace(/ActiveConcentration$/, '') : '?';
         const conc = prof ? prof.value : '?';
-        params.push(P(d.region, `${species} ${fmtConc(conc)}`, `profile "${d.profile}"`));
+        /* The species alone does not say whether a region reads as N+ or P:
+           that is the class the viewer colours it by, so it belongs here. */
+        const e = map && (map.get ? map.get(d.region) : null);
+        const cls = e ? `${e.label} ${e.netType === 'n' ? 'n-type' : 'p-type'}` +
+          (e.counterDoped ? ', counter-doped' : '') : '';
+        params.push(P(d.region, `${species} ${fmtConc(conc)}`,
+          cls ? `${cls} - profile "${d.profile}"` : `profile "${d.profile}"`));
       }
       if ((parsed.profiles || []).length && !params.length) {
         for (const p of parsed.profiles) {
@@ -1086,18 +1317,38 @@
     /* ---------------- contacts ---------------- */
     {
       const params = [];
-      for (const c of (parsed.contacts || [])) {
-        const pts = (c.faces || []).filter(Boolean);
-        if (!pts.length) {
-          params.push(P(c.name, 'declared, not placed', ''));
+      /* A contact is a face, so report the face: which one, on what, how
+         big, and what role it plays. The pick point on its own says where
+         the script asked, not what the electrode actually is. */
+      const ROLE = [
+        [/source/i, 'source'], [/drain/i, 'drain'], [/gate/i, 'gate'],
+        [/well|body|bulk|sub/i, 'body / substrate'],
+      ];
+      const roleOf = (n) => {
+        for (const [re, r] of ROLE) if (re.test(n)) return r;
+        return 'other';
+      };
+      for (const c of resolveContacts(regions, parsed.contacts || [])) {
+        if (c.kind === 'unplaced') {
+          params.push(P(c.name, 'declared, not placed', roleOf(c.name)));
           continue;
         }
-        for (const p of pts) {
-          const owner = regions.filter((r) => contains(r, p));
+        if (c.kind !== 'face') {
           params.push(P(c.name,
-            `(${round(p.x)}, ${round(p.y)}, ${round(p.z)})`,
-            owner.length ? 'on ' + owner.map((r) => r.name).join(', ') : 'NOT on any region'));
+            c.at ? `(${round(c.at.x)}, ${round(c.at.y)}, ${round(c.at.z)})` : '-',
+            c.kind === 'unattached' ? 'NOT on any region'
+                                    : 'pick point on an edge or corner - ambiguous'));
+          continue;
         }
+        const face = `${c.side === 'max' ? '+' : '-'}${c.axis}`;
+        const other = ['x', 'y', 'z'].filter((k) => k !== c.axis);
+        const dims = other.map((k) => nm(c.rect[k + '1'] - c.rect[k + '0'])).join(' x ');
+        /* round() here is toPrecision, not decimal places - passing 1 turned
+           1140 nm2 into 1000. Areas want a fixed decimal, not one sig fig. */
+        params.push(P(c.name, `face contact, ${face} of ${c.region}`,
+          `${roleOf(c.name)} - ${dims} = ${(c.area * 1e6).toFixed(1)} nm², ` +
+          `${c.material}, at ${c.axis} = ${round(c.rect.at)}` +
+          (c.exposed ? '' : ' (buried face)')));
       }
       params.push(P('Work function', 'not in this file',
         'SDE geometry stores contact name, colour and display width only; ' +
@@ -1275,6 +1526,29 @@
   }
 
   /**
+   * Each layer of the gate stack as its own row.
+   *
+   * The high-k rows above describe only the high-k. A two-layer stack has an
+   * interfacial oxide underneath it that is usually the thicker contributor
+   * to EOT, and it is a design parameter in its own right, so it is listed
+   * rather than left to be inferred from the EOT note.
+   */
+  function stackRows(regions, columns) {
+    const layers = gateStackLayers(regions, columns);
+    if (layers.length < 2) return [];
+    const rows = [];
+    for (const [material, t] of layers) {
+      rows.push(P(material + ' layer thickness', nm(t),
+        material === 'SiO2' ? 'interfacial layer, against the silicon'
+                            : 'outside the interfacial layer'));
+    }
+    rows.push(P('Total dielectric thickness',
+      nm(layers.reduce((a, [, t]) => a + t, 0)),
+      `${layers.length} layers between channel and gate metal`));
+    return rows;
+  }
+
+  /**
    * Oxide that belongs to the gate stack, as opposed to the gate liner.
    *
    * Told apart by geometry, not by name: the interfacial oxide is built
@@ -1345,7 +1619,7 @@
 
   window.SDEAnalyze = {
     analyze, check, checkRequired, extractParams,
-    dopingMap, dopingLegend, classify,
+    dopingMap, dopingLegend, classify, resolveContacts,
     boundsOf, overlapVolume, touches, gapBetween,
     DOPING_CLASSES, UNDOPED,
   };

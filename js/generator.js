@@ -2398,7 +2398,12 @@ function showContactsFor(scmText) {
   if (!window.SDE || !window.Preview || !window.Preview.setContacts) return;
   try {
     const parsed = window.SDE.parse(scmText);
-    window.Preview.setContacts(parsed.contacts || []);
+    /* Resolve each pick point to the face it names, so the viewer can draw
+       the electrode itself rather than a dot where it was declared. */
+    const resolved = (window.SDEAnalyze && window.SDEAnalyze.resolveContacts)
+      ? window.SDEAnalyze.resolveContacts(parsed.regions || [], parsed.contacts || [])
+      : [];
+    window.Preview.setContacts(parsed.contacts || [], resolved);
   } catch (_) { /* the badge already reports a parse problem */ }
 }
 

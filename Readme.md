@@ -155,6 +155,13 @@ Everything runs in the browser.
 **Live 3D preview**
 
 - Rebuilds whenever a parameter changes
+- Contacts drawn as the FACES they are, not as labels: `set-contact-faces`
+  names a whole region face, so each electrode is a coloured quad on that
+  face at its real size and orientation, with its pick point marked. Click
+  one for its name, type, the region and material it sits on, its extent
+  and its area. A contact that cannot be resolved to a single face - never
+  placed, missed every region, or landed on an edge - keeps a marker so it
+  stays visible as a fault
 - Every region drawn at its real cuboid coordinates
 - Unique colour per material, identical to `models/region.py`
 - Rotate, zoom and pan
@@ -180,7 +187,8 @@ Everything runs in the browser.
 
 - A Colour control switches the 3D view between three modes: material,
   doping concentration, and material + doping combined, where doped
-  regions take their doping colour and everything else keeps its material
+  regions take their doping colour and everything else keeps its material,
+  with n-type in red and p-type in blue
 - n-type is blue and p-type red, darkening with concentration, so N+, N,
   N-, P+, P and P- are all distinguishable at a glance
 - The legend follows the mode and lists only the classes actually present,
