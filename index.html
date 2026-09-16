@@ -406,7 +406,8 @@
     <div class="card actions-card">
       <div class="section-head static"><h2>Generate</h2></div>
       <div class="section-body actions">
-        <button id="btn-generate" class="btn primary" type="button">Generate</button>
+        <button id="btn-generate" class="btn primary" type="button">Generate SCM</button>
+        <button id="btn-sdevice" class="btn" type="button">Generate SDevice</button>
         <button id="btn-download" class="btn" type="button" disabled>Download .scm</button>
         <button id="btn-reset" class="btn" type="button">Reset</button>
         <button id="btn-copy" class="btn ghost" type="button">Copy SCM</button>
@@ -614,6 +615,216 @@
 
 </div><!-- /#page -->
 
+<!-- ==================== SDevice window ==================== -->
+<div id="sdevice-window" hidden aria-label="SDevice configuration">
+  <header id="sdev-bar">
+    <div class="brand">
+      <span class="dot"></span>
+      <span class="brand-name">Generate SDevice</span>
+    </div>
+    <div class="subtitle" id="sdev-subtitle">no structure loaded</div>
+    <div class="header-right">
+      <button id="sdev-validate" class="btn small" type="button">Validate</button>
+      <button id="sdev-generate" class="btn small primary" type="button">Generate sdevice.cmd</button>
+      <button id="sdev-close" class="icon-btn" type="button" title="Back to the generator">
+        <span class="icon-btn-text">Close</span>
+      </button>
+    </div>
+  </header>
+
+  <div id="sdev-body">
+
+    <!-- ---------------- configuration ---------------- -->
+    <section id="sdev-config" class="sidebar">
+      <div class="sidebar-inner">
+
+        <div class="card">
+          <div class="section-head"><h2>1 &middot; Structure input</h2><span class="chev"></span></div>
+          <div class="section-body">
+            <p class="note">
+              The SCM is the source of truth: the electrodes, regions and mesh
+              filename in the generated deck all come from it. Load the SCM you
+              actually meshed.
+            </p>
+            <div class="actions">
+              <button id="sdev-use-current" class="btn" type="button">Use the generated SCM</button>
+              <button id="sdev-choose-file" class="btn" type="button">Choose file&hellip;</button>
+            </div>
+            <input id="sdev-file" type="file" hidden accept=".scm,.txt,.cmd,text/plain">
+            <div class="field" style="margin-top:12px">
+              <label for="sdev-paste">Or paste the SCM / SDE script</label>
+              <div class="ctl">
+                <textarea id="sdev-paste" rows="7" spellcheck="false"
+                          placeholder="(sde:clear)"></textarea>
+              </div>
+            </div>
+            <button id="sdev-analyze" class="btn primary" type="button" style="width:100%">Analyze structure</button>
+            <div id="sdev-struct" class="import-status">Nothing loaded.</div>
+          </div>
+        </div>
+
+        <div class="card" id="sdev-arch-card">
+          <div class="section-head"><h2>2 &middot; Detected architecture</h2><span class="chev"></span></div>
+          <div class="section-body">
+            <div id="sdev-arch"><p class="note">Analyze a structure to see its regions, materials and electrodes.</p></div>
+          </div>
+        </div>
+
+        <div class="card collapsed">
+          <div class="section-head"><h2>3 &middot; Mesh size</h2><span class="chev"></span></div>
+          <div class="section-body">
+            <p class="note">
+              Mesh refinement lives in the SDE script, not in
+              <code>sdevice.cmd</code> &mdash; by the time SDevice runs the mesh is
+              already a <code>.tdr</code> file. This slider writes refinement
+              commands to paste into the SCM <em>before</em> meshing.
+            </p>
+            <div class="field">
+              <label for="sdev-mesh">Target element size at the active regions</label>
+              <div class="ctl">
+                <input id="sdev-mesh" type="range" min="2" max="100" step="1" value="20"
+                       style="flex:1 1 auto">
+                <span class="unit" id="sdev-mesh-val">2.0 nm</span>
+              </div>
+              <small>Smaller = finer mesh = higher computational cost. Larger = coarser = cheaper. The bulk and the dielectric are scaled from this, not set to it.</small>
+            </div>
+            <button id="sdev-mesh-copy" class="btn ghost" type="button" style="width:100%">Copy the SCM refinement block</button>
+            <pre id="sdev-mesh-block" class="sdev-pre"></pre>
+          </div>
+        </div>
+
+        <div class="card collapsed">
+          <div class="section-head"><h2>4 &middot; Physics</h2><span class="chev"></span></div>
+          <div class="section-body">
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ph-fermi" checked><span>Fermi statistics</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ph-eid" checked><span>EffectiveIntrinsicDensity (OldSlotboom)</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ph-mobdop" checked><span>Mobility: DopingDependence</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ph-mobenorm" checked><span>Mobility: Enormal</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ph-mobhf" checked><span>Mobility: HighFieldSaturation</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ph-srh" checked><span>Recombination: SRH (DopingDependence)</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ph-auger" checked><span>Recombination: Auger</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ph-b2b"><span>Band2Band (Hurkx) &mdash; GIDL and ambipolar</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ph-aval"><span>Avalanche (vanOverstraeten)</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ph-quantum"><span>Quantum potential correction</span></label></div>
+          </div>
+        </div>
+
+        <div class="card collapsed">
+          <div class="section-head"><h2>5 &middot; Self-heating</h2><span class="chev"></span></div>
+          <div class="section-body">
+            <div class="field">
+              <label class="chk-field"><input type="checkbox" id="th-on" checked><span>Enable self-heating (Thermodynamic)</span></label>
+              <small>Adds Thermodynamic to Physics, Temperature to every Coupled step, and a Thermode on the chosen contact.</small>
+            </div>
+            <div class="field">
+              <label for="th-contact">Thermal contact</label>
+              <div class="ctl"><select id="th-contact"></select></div>
+              <small>The single heat sink. A second thermode beside one device would make it look cooler for purely numerical reasons.</small>
+            </div>
+            <div class="grid2">
+              <div class="field compact">
+                <label for="th-ambient">Ambient temperature</label>
+                <div class="ctl"><input id="th-ambient" type="number" step="1" value="300"><span class="unit">K</span></div>
+              </div>
+              <div class="field compact">
+                <label for="th-rsurf">Surface resistance</label>
+                <div class="ctl"><input id="th-rsurf" type="number" step="0.001" value="0"><span class="unit">cm2K/W</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card collapsed">
+          <div class="section-head"><h2>6 &middot; Bias</h2><span class="chev"></span></div>
+          <div class="section-body">
+            <div class="grid2">
+              <div class="field compact">
+                <label for="bi-vdd">Supply |VDD|</label>
+                <div class="ctl"><input id="bi-vdd" type="number" step="0.05" value="0.75"><span class="unit">V</span></div>
+              </div>
+              <div class="field compact">
+                <label for="bi-vdlin">Linear |VDS|</label>
+                <div class="ctl"><input id="bi-vdlin" type="number" step="0.01" value="0.05"><span class="unit">V</span></div>
+              </div>
+              <div class="field compact">
+                <label for="bi-vgstart">Gate sweep start</label>
+                <div class="ctl"><input id="bi-vgstart" type="number" step="0.05" value="-0.30"><span class="unit">V</span></div>
+              </div>
+            </div>
+            <p class="note" style="margin-top:6px">Starting below Vt puts Ioff, the subthreshold slope and the ambipolar branch inside the measured range. PMOS biases are negated automatically.</p>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="bi-idvglin" checked><span>ID-VG at linear VDS</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="bi-idvgsat" checked><span>ID-VG at saturation VDS</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="bi-idvd" checked><span>ID-VD output characteristic</span></label></div>
+            <div id="sdev-wf"></div>
+          </div>
+        </div>
+
+        <div class="card collapsed">
+          <div class="section-head"><h2>7 &middot; Solver and output</h2><span class="chev"></span></div>
+          <div class="section-body">
+            <div class="grid2">
+              <div class="field compact">
+                <label for="ma-digits">Digits</label>
+                <div class="ctl"><input id="ma-digits" type="number" step="1" value="5"></div>
+              </div>
+              <div class="field compact">
+                <label for="ma-iter">Iterations</label>
+                <div class="ctl"><input id="ma-iter" type="number" step="1" value="25"></div>
+              </div>
+              <div class="field compact">
+                <label for="ma-notdamped">Notdamped</label>
+                <div class="ctl"><input id="ma-notdamped" type="number" step="1" value="100"></div>
+              </div>
+              <div class="field compact">
+                <label for="ma-submethod">Linear solver</label>
+                <div class="ctl">
+                  <select id="ma-submethod">
+                    <option value="ParDiSo">ParDiSo</option>
+                    <option value="ILS">ILS</option>
+                    <option value="SuperLU">SuperLU</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="pl-field" checked><span>Plot electric field</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="pl-carriers" checked><span>Plot carrier densities</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="pl-mobility" checked><span>Plot mobility and velocity</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="pl-bands" checked><span>Plot band edges</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="pl-temp" checked><span>Plot temperature and heat</span></label></div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ---------------- generated deck ---------------- -->
+    <section id="sdev-out">
+      <div class="preview-head">
+        <h2 class="preview-title">sdevice.cmd <span id="sdev-lines" class="dim"></span></h2>
+        <div class="preview-tools">
+          <div class="tool-group">
+            <button id="sdev-copy" class="btn tiny" type="button">Copy</button>
+            <button id="sdev-download" class="btn tiny" type="button" disabled>Download</button>
+            <button id="sdev-regen" class="btn tiny" type="button">Regenerate</button>
+            <button id="sdev-reset" class="btn tiny" type="button">Reset settings</button>
+          </div>
+          <div class="tool-group">
+            <span class="tool-label">Find</span>
+            <input id="sdev-find" type="text" placeholder="search" style="width:130px">
+            <span id="sdev-find-count" class="tool-label"></span>
+          </div>
+          <div class="tool-group">
+            <label class="chk"><input type="checkbox" id="sdev-editable"> Editable</label>
+          </div>
+        </div>
+      </div>
+      <div id="sdev-report" class="sdev-report"></div>
+      <pre id="sdev-code" class="sdev-code" tabindex="0"></pre>
+    </section>
+
+  </div>
+</div>
+
 <!-- scrim behind the mobile drawers -->
 <div id="drawer-scrim" hidden></div>
 
@@ -625,6 +836,7 @@
 <script src="js/preview.js"></script>
 <script src="js/sde-parser.js"></script>
 <script src="js/analyze.js"></script>
+<script src="js/sdevice.js"></script>
 <script src="js/generator.js"></script>
 </body>
 </html>

@@ -53,6 +53,29 @@ Everything runs in the browser.
   procedures, or those procedures with their comments
 - Download the `.scm`, or copy it to the clipboard
 
+**SDevice**
+
+- A **Generate SDevice** button opens a separate window: load or paste an
+  SCM, analyze it, configure, generate `sdevice.cmd`, validate, edit, export
+- The deck is built from the **parsed structure, not a template**. Every
+  electrode is a contact that exists in the file, every region named in
+  `CurrentPlot` is a region that exists, and the `Grid` filename comes from
+  the file's own `sde:build-mesh`. Load a seven-contact structure and you
+  get seven electrodes; load an eight-contact one and you get eight
+- Electrode roles are read from the contact names - gate, source, drain,
+  well, bulk, and the n/p device each belongs to - so the bias ramps are
+  built per device with the PMOS polarities negated
+- Plain Sentaurus syntax throughout: no macros, no parameter blocks, no
+  intermediate definitions. The generated file is meant to be read and
+  edited by hand
+- Configurable: physics models, self-heating and its thermal contact, bias
+  sweeps and workfunctions, solver and output, plus a mesh-size slider
+- Validation before generation, reported as a `✓ / ⚠ / ✗` list. Errors
+  block generation rather than producing a deck that would abort - or
+  worse, run and give plausible numbers for the wrong structure
+- The code view has line numbers, syntax highlighting, search, an editable
+  mode, Copy, Download and Regenerate
+
 **Structure analysis**
 
 - Every loaded or generated structure is measured and reported: architecture,
@@ -200,6 +223,7 @@ project/
     ├── generator.js    compute, validate, buildScm, buildFlatScm, import, layout
     ├── sde-parser.js   reader and evaluator for SDE text; window.SDE
     ├── analyze.js      parameter extraction + consistency check; window.SDEAnalyze
+    ├── sdevice.js      sdevice.cmd from a parsed structure; window.SDevice
     └── preview.js      Three.js scene, picking, cameras
 ```
 
@@ -354,6 +378,22 @@ and the contact that lands on nothing.
 | 4 | 108 | 31 | 3 | clean |
 | 6 | 148 | 43 | 5 | clean |
 | 8 | 188 | 55 | 7 | clean |
+
+**The SDevice generator is checked against two different structures.** The
+app's own output has seven contacts; the V13 reference has eight, the extra
+one being an `nwell` electrode on the pFET body. The same code produces a
+seven-electrode deck for the first and an eight-electrode deck for the
+second, with the right `Grid` filename in each, and reports "no well or body
+electrode for the PMOS" only for the one that genuinely lacks it. That is
+the test that a template would fail.
+
+**Mesh size is an SCM control, not an SDevice one.** By the time SDevice
+runs, the mesh is already a `.tdr` file - refinement is defined in the SDE
+script. The slider therefore writes `sdedr:define-refinement-*` commands to
+paste into the SCM before meshing, rather than pretending to change
+something `sdevice.cmd` governs. It scales the bulk, the active band and
+the gate dielectric from one target size, and resolves the dielectric in Y
+against the thinnest dielectric region actually present.
 
 Two notes on scope, because the honest answer is more useful than a
 plausible-looking number:

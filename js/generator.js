@@ -1893,6 +1893,7 @@ function initGenerator() {
   initImport();
   initScriptView();
   initViewerTools();
+  initSdevice();
 
   // layout: sidebar resizing, drawer mode, viewport watchers
   initLayout();
@@ -2924,4 +2925,528 @@ function initViewerTools() {
   });
 
   on('#btn-clear-flags', 'click', clearFlags);
+}
+
+
+/* ==========================================================================
+   12. THE SDevice WINDOW
+   --------------------------------------------------------------------------
+   Generate SCM -> Generate SDevice -> load or paste an SCM -> analyze ->
+   configure -> generate -> validate -> edit -> export.
+
+   The window keeps its own copy of the parsed structure. It is deliberately
+   NOT wired to whatever the 3D preview happens to be showing: the deck must
+   describe the SCM that was actually meshed, and silently following the
+   preview would make it easy to export a deck for a different structure.
+   "Use the generated SCM" copies it across explicitly.
+   ========================================================================== */
+
+const sdev = {
+  parsed: null,
+  analysis: null,
+  settings: null,
+  cmd: '',
+  source: null,
+};
+
+function sdevOpen() {
+  const w = $('#sdevice-window');
+  if (!w) return;
+  w.hidden = false;
+  if (!sdev.parsed && app.lastScm) sdevLoad(app.lastScm, 'the generated SCM');
+  sdevSyncMesh();
+}
+
+function sdevClose() {
+  const w = $('#sdevice-window');
+  if (w) w.hidden = true;
+  if (window.Preview && window.Preview.resize) {
+    requestAnimationFrame(() => window.Preview.resize());
+  }
+}
+
+/* ------------------------------------------------------------ analysis */
+
+function sdevSetStatus(kind, html) {
+  const el = $('#sdev-struct');
+  if (!el) return;
+  el.className = 'import-status ' + (kind || '');
+  el.innerHTML = html;
+}
+
+function sdevLoad(text, label) {
+  if (!window.SDE || !window.SDEAnalyze || !window.SDevice) {
+    sdevSetStatus('error', 'The SDE modules did not load.');
+    return false;
+  }
+  const what = window.SDE.detect(text, null);
+  if (what.kind === 'empty' || what.kind === 'unknown') {
+    sdevSetStatus('error',
+      `<strong>Not recognised.</strong> ${escapeHtml(what.reason)}.`);
+    return false;
+  }
+
+  const parsed = window.SDE.parse(text);
+  if (!parsed.regions.length) {
+    sdevSetStatus('error',
+      '<strong>No geometry.</strong> The script parsed but produced no regions, ' +
+      'so there is nothing to build a device from.');
+    return false;
+  }
+
+  sdev.parsed = parsed;
+  sdev.analysis = window.SDEAnalyze.analyze(parsed);
+  sdev.source = label || 'pasted text';
+
+  // keep the user's settings across a reload where the names still fit
+  const fresh = window.SDevice.defaultSettings(parsed, sdev.analysis);
+  sdev.settings = sdev.settings ? mergeSettings(fresh, sdev.settings) : fresh;
+
+  sdevFillControls();
+  sdevRenderArch();
+  sdevSyncMesh();
+
+  const elec = window.SDevice.classifyElectrodes(parsed.contacts);
+  sdevSetStatus('ok',
+    `<strong>Loaded ${escapeHtml(sdev.source)}.</strong> ` +
+    `${parsed.regions.length} regions, ${elec.length} electrodes, ` +
+    `mesh ${escapeHtml(sdev.settings.grid)}.`);
+  const sub = $('#sdev-subtitle');
+  if (sub) {
+    sub.textContent = `${sdev.analysis.architecture.name} · ` +
+      `${parsed.regions.length} regions · ${elec.length} electrodes`;
+  }
+  return true;
+}
+
+/** Carry user choices forward, but never an electrode that no longer exists. */
+function mergeSettings(fresh, old) {
+  const out = JSON.parse(JSON.stringify(fresh));
+  for (const k of ['physics', 'math', 'plot', 'bias', 'meshControl']) {
+    Object.assign(out[k], old[k] || {});
+  }
+  out.temperature = old.temperature;
+  out.thermal.enabled = old.thermal.enabled;
+  out.thermal.ambient = old.thermal.ambient;
+  out.thermal.surfaceResistance = old.thermal.surfaceResistance;
+  // the thermode only survives if that contact is still in the structure
+  const names = (fresh.workfunction && Object.keys(fresh.workfunction)) || [];
+  if (old.thermal.thermode &&
+      sdev.parsed.contacts.some((c) => c.name === old.thermal.thermode)) {
+    out.thermal.thermode = old.thermal.thermode;
+  }
+  for (const g of names) {
+    if (old.workfunction && old.workfunction[g] !== undefined) {
+      out.workfunction[g] = old.workfunction[g];
+    }
+  }
+  return out;
+}
+
+function sdevRenderArch() {
+  const el = $('#sdev-arch');
+  if (!el || !sdev.parsed) return;
+  const p = sdev.parsed;
+  const a = sdev.analysis;
+  const elec = window.SDevice.classifyElectrodes(p.contacts);
+  const mats = [...new Set(p.regions.map((r) => r.material))].sort();
+  const rows = [];
+
+  const row = (k, v, note) => rows.push(
+    '<div class="an-row"><span class="an-label">' + escapeHtml(k) + '</span>' +
+    '<span class="an-value">' + escapeHtml(String(v)) + '</span>' +
+    (note ? '<span class="an-note">' + escapeHtml(note) + '</span>' : '') + '</div>');
+
+  row('Architecture', a.architecture.name, a.architecture.confidence + ' confidence');
+  row('Regions', p.regions.length);
+  row('Materials', mats.length, mats.join(', '));
+  row('Doping profiles', p.profiles.length, p.doping.length + ' placements');
+  row('Mesh file', sdev.settings.grid,
+      p.meshPrefix ? 'from the script\'s own sde:build-mesh' : 'guessed - no build-mesh found');
+
+  for (const e of elec) {
+    row(e.name, e.role + (e.device ? ' · ' + e.device.toUpperCase() + 'MOS' : ''),
+        e.role === 'other' ? 'no recognised role; declared and held at 0 V' : '');
+  }
+
+  // a few geometry figures, where the analyser found them
+  const want = ['Gate length L_G', 'Column 1: sheets', 'Column 1: sheet thickness T_NS',
+                'Column 1: sheet width W_NS', 'EOT'];
+  for (const g of a.groups) {
+    for (const prm of g.params) {
+      if (want.includes(prm.label)) row(prm.label, prm.value, prm.note);
+    }
+  }
+
+  el.innerHTML = rows.join('');
+}
+
+/* ------------------------------------------------------------- controls */
+
+function sdevFillControls() {
+  const st = sdev.settings;
+  if (!st) return;
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
+  const chk = (id, v) => { const e = document.getElementById(id); if (e) e.checked = !!v; };
+
+  chk('ph-fermi', st.physics.fermi); chk('ph-eid', st.physics.eid);
+  chk('ph-mobdop', st.physics.mobDoping); chk('ph-mobenorm', st.physics.mobEnormal);
+  chk('ph-mobhf', st.physics.mobHighField);
+  chk('ph-srh', st.physics.srh); chk('ph-auger', st.physics.auger);
+  chk('ph-b2b', st.physics.band2band); chk('ph-aval', st.physics.avalanche);
+  chk('ph-quantum', st.physics.quantum);
+
+  chk('th-on', st.thermal.enabled);
+  set('th-ambient', st.thermal.ambient);
+  set('th-rsurf', st.thermal.surfaceResistance);
+
+  // the thermal contact list is the structure's own contacts, nothing else
+  const sel = $('#th-contact');
+  if (sel && sdev.parsed) {
+    sel.innerHTML = '<option value="">(none)</option>' +
+      sdev.parsed.contacts.map((c) =>
+        `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+    sel.value = st.thermal.thermode || '';
+  }
+
+  set('bi-vdd', st.bias.vdd); set('bi-vdlin', st.bias.vdlin);
+  set('bi-vgstart', st.bias.vgStart);
+  chk('bi-idvglin', st.bias.idvgLin); chk('bi-idvgsat', st.bias.idvgSat);
+  chk('bi-idvd', st.bias.idvd);
+
+  set('ma-digits', st.math.digits); set('ma-iter', st.math.iterations);
+  set('ma-notdamped', st.math.notdamped); set('ma-submethod', st.math.subMethod);
+
+  chk('pl-field', st.plot.field); chk('pl-carriers', st.plot.carriers);
+  chk('pl-mobility', st.plot.mobility); chk('pl-bands', st.plot.bands);
+  chk('pl-temp', st.plot.temperature);
+
+  set('sdev-mesh', Math.round(st.meshControl.size * 10));
+
+  // one workfunction field per gate actually present
+  const wf = $('#sdev-wf');
+  if (wf) {
+    const gates = Object.keys(st.workfunction);
+    wf.innerHTML = gates.length
+      ? '<div class="an-head" style="margin-top:10px">Gate workfunction</div>' +
+        gates.map((g) =>
+          '<div class="field compact"><label for="wf-' + escapeHtml(g) + '">' +
+          escapeHtml(g) + '</label><div class="ctl"><input id="wf-' + escapeHtml(g) +
+          '" type="number" step="0.01" value="' + st.workfunction[g] +
+          '"><span class="unit">eV</span></div></div>').join('')
+      : '';
+    for (const g of gates) {
+      const inp = document.getElementById('wf-' + g);
+      if (inp) inp.addEventListener('input', sdevReadControls);
+    }
+  }
+}
+
+function sdevReadControls() {
+  const st = sdev.settings;
+  if (!st) return;
+  const num = (id, d) => {
+    const e = document.getElementById(id);
+    const v = e ? parseFloat(e.value) : NaN;
+    return Number.isFinite(v) ? v : d;
+  };
+  const on = (id) => { const e = document.getElementById(id); return !!(e && e.checked); };
+
+  st.physics.fermi = on('ph-fermi'); st.physics.eid = on('ph-eid');
+  st.physics.mobDoping = on('ph-mobdop'); st.physics.mobEnormal = on('ph-mobenorm');
+  st.physics.mobHighField = on('ph-mobhf');
+  st.physics.srh = on('ph-srh'); st.physics.auger = on('ph-auger');
+  st.physics.band2band = on('ph-b2b'); st.physics.avalanche = on('ph-aval');
+  st.physics.quantum = on('ph-quantum');
+
+  st.thermal.enabled = on('th-on');
+  const sel = $('#th-contact');
+  st.thermal.thermode = sel && sel.value ? sel.value : null;
+  st.thermal.ambient = num('th-ambient', 300);
+  st.thermal.surfaceResistance = num('th-rsurf', 0);
+  st.temperature = st.thermal.ambient;
+
+  st.bias.vdd = num('bi-vdd', 0.75);
+  st.bias.vdlin = num('bi-vdlin', 0.05);
+  st.bias.vgStart = num('bi-vgstart', -0.3);
+  st.bias.idvgLin = on('bi-idvglin'); st.bias.idvgSat = on('bi-idvgsat');
+  st.bias.idvd = on('bi-idvd');
+
+  st.math.digits = num('ma-digits', 5);
+  st.math.iterations = num('ma-iter', 25);
+  st.math.notdamped = num('ma-notdamped', 100);
+  const sm = $('#ma-submethod'); if (sm) st.math.subMethod = sm.value;
+
+  st.plot.field = on('pl-field'); st.plot.carriers = on('pl-carriers');
+  st.plot.mobility = on('pl-mobility'); st.plot.bands = on('pl-bands');
+  st.plot.temperature = on('pl-temp');
+
+  for (const g of Object.keys(st.workfunction)) {
+    st.workfunction[g] = num('wf-' + g, st.workfunction[g]);
+  }
+
+  st.meshControl.size = num('sdev-mesh', 20) / 10;
+}
+
+/* ---------------------------------------------------------------- mesh */
+
+function sdevSyncMesh() {
+  const slider = $('#sdev-mesh');
+  const out = $('#sdev-mesh-val');
+  if (!slider) return;
+  const nm = Number(slider.value) / 10;
+  if (out) out.textContent = nm.toFixed(1) + ' nm';
+  if (sdev.settings) sdev.settings.meshControl.size = nm;
+
+  const pre = $('#sdev-mesh-block');
+  if (pre && sdev.parsed && window.SDevice) {
+    pre.textContent = window.SDevice.buildMeshBlock(sdev.parsed, sdev.analysis, nm);
+  }
+}
+
+/* ----------------------------------------------------- validate + build */
+
+function sdevRenderReport(findings) {
+  const el = $('#sdev-report');
+  if (!el) return;
+  el.innerHTML = findings.map((f) => {
+    const mark = f.level === 'ok' ? '✓' : f.level === 'warn' ? '⚠' : '✗';
+    return `<div class="sdev-line ${f.level}"><span class="mark">${mark}</span>` +
+           `<span>${escapeHtml(f.message)}</span></div>`;
+  }).join('');
+}
+
+function sdevValidate(quiet) {
+  if (!sdev.parsed) {
+    sdevRenderReport([{ level: 'error', message: 'No structure loaded. Load or paste an SCM first.' }]);
+    return null;
+  }
+  sdevReadControls();
+  const v = window.SDevice.validate(sdev.parsed, sdev.analysis, sdev.settings);
+  sdevRenderReport(v.findings);
+  if (!quiet) {
+    const errs = v.findings.filter((f) => f.level === 'error').length;
+    const warns = v.findings.filter((f) => f.level === 'warn').length;
+    sdevSetStatus(errs ? 'error' : warns ? 'warn' : 'ok',
+      errs ? `<strong>${errs} error(s)</strong> - fix these before generating.`
+           : warns ? `<strong>Valid, with ${warns} warning(s).</strong>`
+                   : '<strong>Valid.</strong> Everything checks out against the structure.');
+  }
+  return v;
+}
+
+function sdevRenderCode(text) {
+  const pre = $('#sdev-code');
+  const label = $('#sdev-lines');
+  const dl = $('#sdev-download');
+  if (!pre) return;
+  pre.textContent = '';
+  const body = String(text || '');
+  if (!body.trim()) {
+    if (label) label.textContent = '';
+    if (dl) dl.disabled = true;
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  for (const line of body.replace(/\n$/, '').split('\n')) {
+    const div = document.createElement('div');
+    div.className = 'cl';
+    div.innerHTML = sdevHighlight(line);
+    frag.appendChild(div);
+  }
+  pre.appendChild(frag);
+  if (label) {
+    label.textContent = body.split('\n').length + ' lines, ' +
+                        (body.length / 1024).toFixed(1) + ' kB';
+  }
+  if (dl) dl.disabled = false;
+  sdevFind();
+}
+
+/** The only syntax this file has: comments, strings, block names, numbers. */
+function sdevHighlight(line) {
+  const esc = escapeHtml(line);
+  if (/^\s*\*/.test(line)) return `<span class="c">${esc}</span>`;
+  return esc
+    .replace(/(&quot;[^&]*?&quot;)/g, '<span class="s">$1</span>')
+    .replace(/\b(File|Electrode|Thermode|Physics|Plot|CurrentPlot|Math|Solve|Quasistationary|Coupled|Goal|Mobility|Recombination)\b/g,
+             '<span class="k">$1</span>')
+    .replace(/(?<![\w.])(-?\d+\.?\d*(?:e[+-]?\d+)?)(?![\w.])/gi, '<span class="n">$1</span>');
+}
+
+function sdevGenerate() {
+  if (!sdev.parsed) {
+    sdevSetStatus('error', '<strong>No structure loaded.</strong> Load or paste an SCM first.');
+    sdevRenderReport([{ level: 'error', message: 'No structure loaded.' }]);
+    return;
+  }
+  const v = sdevValidate(true);
+  if (!v) return;
+
+  if (!v.ok) {
+    /* refuse rather than emit a deck that will abort, or worse, run and
+       give plausible numbers for the wrong structure */
+    const errs = v.findings.filter((f) => f.level === 'error');
+    sdevSetStatus('error',
+      `<strong>Not generated.</strong> ${errs.length} error(s) would make the ` +
+      `deck invalid for this structure. See the report.`);
+    sdevRenderCode('');
+    sdev.cmd = '';
+    return;
+  }
+
+  sdev.cmd = window.SDevice.buildSdevice(sdev.parsed, sdev.analysis, sdev.settings);
+  sdevRenderCode(sdev.cmd);
+  const warns = v.findings.filter((f) => f.level === 'warn').length;
+  sdevSetStatus(warns ? 'warn' : 'ok',
+    `<strong>Generated.</strong> ${sdev.cmd.split('\n').length} lines for ` +
+    `${escapeHtml(sdev.settings.grid)}` + (warns ? `, ${warns} warning(s).` : '.'));
+}
+
+/* --------------------------------------------------------------- search */
+
+function sdevFind() {
+  const q = ($('#sdev-find') || {}).value || '';
+  const pre = $('#sdev-code');
+  const count = $('#sdev-find-count');
+  if (!pre) return;
+  pre.querySelectorAll('.hit').forEach((el) => {
+    el.replaceWith(document.createTextNode(el.textContent));
+  });
+  pre.normalize();
+  if (!q) { if (count) count.textContent = ''; return; }
+
+  let n = 0;
+  const walk = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+  const targets = [];
+  while (walk.nextNode()) {
+    if (walk.currentNode.nodeValue.toLowerCase().includes(q.toLowerCase())) {
+      targets.push(walk.currentNode);
+    }
+  }
+  for (const node of targets) {
+    const parts = node.nodeValue.split(new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'));
+    const frag = document.createDocumentFragment();
+    for (const part of parts) {
+      if (part.toLowerCase() === q.toLowerCase() && part) {
+        const m = document.createElement('span');
+        m.className = 'hit';
+        m.textContent = part;
+        frag.appendChild(m);
+        n++;
+      } else if (part) {
+        frag.appendChild(document.createTextNode(part));
+      }
+    }
+    node.replaceWith(frag);
+  }
+  if (count) count.textContent = n ? `${n} match${n > 1 ? 'es' : ''}` : 'no match';
+}
+
+/* ----------------------------------------------------------------- boot */
+
+function initSdevice() {
+  const on = (sel, ev, fn) => { const el = $(sel); if (el) el.addEventListener(ev, fn); };
+
+  on('#btn-sdevice', 'click', sdevOpen);
+  on('#sdev-close', 'click', sdevClose);
+  document.addEventListener('keydown', (e) => {
+    const w = $('#sdevice-window');
+    if (e.key === 'Escape' && w && !w.hidden) sdevClose();
+  });
+
+  on('#sdev-use-current', 'click', () => {
+    if (!app.lastScm) {
+      sdevSetStatus('error', '<strong>Nothing generated yet.</strong> Press Generate SCM first.');
+      return;
+    }
+    $('#sdev-paste').value = app.lastScm;
+    sdevLoad(app.lastScm, 'the generated SCM');
+  });
+
+  on('#sdev-choose-file', 'click', () => {
+    const f = $('#sdev-file');
+    if (f) { f.value = ''; f.click(); }
+  });
+  on('#sdev-file', 'change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = () => {
+      $('#sdev-paste').value = String(r.result || '');
+      sdevLoad(String(r.result || ''), file.name);
+    };
+    r.onerror = () => sdevSetStatus('error', 'Could not read that file.');
+    r.readAsText(file);
+  });
+
+  on('#sdev-analyze', 'click', () => {
+    const t = $('#sdev-paste');
+    sdevLoad(t ? t.value : '', 'pasted text');
+  });
+
+  on('#sdev-validate', 'click', () => sdevValidate(false));
+  on('#sdev-generate', 'click', sdevGenerate);
+  on('#sdev-regen', 'click', sdevGenerate);
+
+  on('#sdev-reset', 'click', () => {
+    if (!sdev.parsed) return;
+    sdev.settings = window.SDevice.defaultSettings(sdev.parsed, sdev.analysis);
+    sdevFillControls();
+    sdevSyncMesh();
+    sdevGenerate();
+    sdevSetStatus('ok', '<strong>Settings reset</strong> to the defaults for this structure.');
+  });
+
+  on('#sdev-mesh', 'input', sdevSyncMesh);
+  on('#sdev-mesh-copy', 'click', () => {
+    const t = ($('#sdev-mesh-block') || {}).textContent || '';
+    if (!t.trim()) return;
+    navigator.clipboard.writeText(t)
+      .then(() => sdevSetStatus('ok', '<strong>Refinement block copied.</strong> Paste it into the SCM before sde:build-mesh.'))
+      .catch(() => sdevSetStatus('warn', 'Clipboard blocked by the browser.'));
+  });
+
+  on('#sdev-copy', 'click', () => {
+    if (!sdev.cmd) return;
+    navigator.clipboard.writeText(sdev.cmd)
+      .then(() => sdevSetStatus('ok', `<strong>Copied</strong> ${sdev.cmd.split('\n').length} lines.`))
+      .catch(() => sdevSetStatus('warn', 'Clipboard blocked by the browser; use Download.'));
+  });
+
+  on('#sdev-download', 'click', () => {
+    if (!sdev.cmd) return;
+    downloadText('sdevice.cmd', sdev.cmd);
+    sdevSetStatus('ok', '<strong>Downloaded sdevice.cmd.</strong>');
+  });
+
+  on('#sdev-find', 'input', sdevFind);
+
+  on('#sdev-editable', 'change', (e) => {
+    const pre = $('#sdev-code');
+    if (!pre) return;
+    pre.contentEditable = e.target.checked ? 'true' : 'false';
+    if (e.target.checked) {
+      sdevSetStatus('warn',
+        '<strong>Editing by hand.</strong> Regenerate will discard your edits.');
+    } else {
+      // take the edited text back, so Copy and Download carry it
+      sdev.cmd = [...pre.querySelectorAll('.cl')].map((d) => d.textContent).join('\n');
+      sdevRenderCode(sdev.cmd);
+    }
+  });
+
+  // any control change refreshes the settings; the deck is regenerated on
+  // demand rather than on every keystroke, so a half-typed number never
+  // produces a half-valid file
+  const w = $('#sdevice-window');
+  if (w) {
+    w.addEventListener('change', (e) => {
+      if (e.target.closest('#sdev-config')) sdevReadControls();
+    });
+  }
+
+  $$('#sdevice-window .section-head:not(.static)').forEach((h) => {
+    h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed'));
+  });
 }

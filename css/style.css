@@ -951,6 +951,143 @@ body.script-expanded #scm-section { max-height: none; flex: 1 1 auto; }
   text-overflow: ellipsis;
 }
 
+/* ==========================================================================
+   SDevice window
+   A full overlay rather than another column: it is a separate task with its
+   own inputs, and squeezing it into the three-column shell would leave both
+   halves cramped.
+   ========================================================================== */
+#sdevice-window {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+}
+#sdevice-window[hidden] { display: none; }
+
+#sdev-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 14px;
+  min-height: 46px;
+  background: linear-gradient(180deg, #1d242c, #151a21);
+  border-bottom: 1px solid var(--line);
+}
+
+#sdev-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 0;
+  padding: var(--pad);
+}
+
+#sdev-config {
+  flex: 0 0 auto;
+  width: 420px;
+  min-width: 0;
+}
+#sdev-config .sidebar-inner { padding-right: 8px; }
+
+#sdev-out {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-left: 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.sdev-report {
+  flex: 0 0 auto;
+  max-height: 34%;
+  overflow-y: auto;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+.sdev-report:empty { display: none; }
+.sdev-line { display: flex; gap: 8px; align-items: baseline; }
+.sdev-line .mark { flex: 0 0 auto; font-family: var(--mono); font-weight: 700; }
+.sdev-line.ok    .mark { color: var(--ok); }
+.sdev-line.warn  .mark { color: var(--warn); }
+.sdev-line.error .mark { color: var(--err); }
+.sdev-line.error { color: var(--fg); }
+
+.sdev-code {
+  counter-reset: sdevline;
+  flex: 1 1 auto;
+  margin: 0;
+  min-height: 0;
+  padding: 12px;
+  background: var(--bg-0);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #b9c4d0;
+  overflow: auto;
+  white-space: pre;
+  tab-size: 4;
+  outline: none;
+}
+.sdev-code:empty::before {
+  content: "press Generate sdevice.cmd";
+  color: var(--fg-dim);
+  font-style: italic;
+}
+.sdev-code[contenteditable="true"] { background: #0c1016; box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* one line, numbered from a counter so selecting the code skips the gutter */
+.sdev-code .cl { counter-increment: sdevline; display: block; padding-left: 52px; text-indent: -52px; }
+.sdev-code .cl::before {
+  content: counter(sdevline);
+  display: inline-block;
+  width: 40px; margin-right: 12px;
+  text-align: right; color: #4c5764; text-indent: 0;
+  user-select: none; -webkit-user-select: none;
+}
+/* the only syntax this file has: block names, strings, comments, numbers */
+.sdev-code .k { color: #7fb4ff; font-weight: 600; }
+.sdev-code .s { color: #7fd6a0; }
+.sdev-code .c { color: #5d6875; font-style: italic; }
+.sdev-code .n { color: #e8b978; }
+.sdev-code .hit { background: rgba(255,225,77,.28); border-radius: 2px; }
+
+.sdev-pre {
+  margin: 10px 0 0;
+  padding: 9px 10px;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: #9fb0c0;
+  white-space: pre;
+}
+.sdev-pre:empty { display: none; }
+
+#sdev-arch .an-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); }
+
+@media (max-width: 1000px) {
+  #sdev-body { flex-direction: column; padding: 8px; }
+  #sdev-config { width: auto; flex: 0 0 auto; max-height: 45%; }
+  #sdev-out { margin-left: 0; margin-top: 10px; flex: 1 1 auto; }
+  #sdev-bar .subtitle { display: none; }
+}
+
 /* ------------------------------------------------------------- scrim */
 #drawer-scrim {
   position: fixed;
