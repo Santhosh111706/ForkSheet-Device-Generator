@@ -389,6 +389,25 @@
         </div>
 
         <div class="field">
+          <label for="MESH_NM">Mesh size &mdash; target element at the active regions</label>
+          <div class="ctl">
+            <input id="mesh-slider" type="range" min="5" max="200" step="1" value="20"
+                   style="flex:1 1 auto" aria-describedby="mesh-help">
+            <input id="MESH_NM" type="number" step="0.1" min="0.5" max="20" value="2"
+                   style="flex:0 0 74px">
+            <span class="unit">nm</span>
+          </div>
+          <small id="mesh-help">
+            Scales every <code>sdedr:define-refinement-size</code> in the generated
+            SCM, so it changes the mesh snmesh actually builds. Smaller = finer =
+            more elements and longer solves; larger = coarser = cheaper. The
+            ratios are preserved, so the channel, the gate dielectric and both
+            junctions stay finer than the bulk. 2 nm is the baseline and emits the
+            refinement lines unchanged.
+          </small>
+        </div>
+
+        <div class="field">
           <label for="scm-format">Output format</label>
           <div class="ctl">
             <select id="scm-format">
@@ -674,10 +693,15 @@
           <div class="section-head"><h2>3 &middot; Mesh size</h2><span class="chev"></span></div>
           <div class="section-body">
             <p class="note">
+              For a structure loaded from <em>elsewhere</em>. If the SCM came from
+              this generator, use the Mesh size control under Generation options
+              instead &mdash; that one rewrites the refinement lines directly.
+            </p>
+            <p class="note">
               Mesh refinement lives in the SDE script, not in
               <code>sdevice.cmd</code> &mdash; by the time SDevice runs the mesh is
               already a <code>.tdr</code> file. This slider writes refinement
-              commands to paste into the SCM <em>before</em> meshing.
+              commands to paste into the loaded SCM <em>before</em> meshing.
             </p>
             <div class="field">
               <label for="sdev-mesh">Target element size at the active regions</label>

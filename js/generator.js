@@ -55,6 +55,12 @@ const DEFAULT_CONSTANTS = {
   // stack height: the V8 baseline is three sheets, but nothing below
   // assumes it any more
   N_SHEETS: 3,
+  /* Target element size in NANOMETRES at the active regions. Every
+     refinement size in the emitted SCM is scaled from this, so the slider
+     changes the mesh that snmesh actually builds - not a label.
+     2 nm is the V8 baseline, and at exactly 2 nm the refinement lines are
+     emitted verbatim, so the default output is unchanged. */
+  MESH_NM: 2,
 };
 
 /* Doping concentrations, cm^-3. These were literals inside the SCM template;
@@ -550,6 +556,49 @@ function n(v) {
   return s;
 }
 
+/* ==========================================================================
+   MESH REFINEMENT SIZES
+   --------------------------------------------------------------------------
+   One table, used by both emitters. The strings are the V8 baseline values,
+   kept verbatim so that at the default 2 nm the generated SCM is unchanged
+   down to the trailing zeros. At any other setting every number is scaled
+   by MESH_NM / 2.
+
+   Scaling the whole table rather than setting one size everywhere is the
+   point: the RATIOS carry the refinement strategy - fine at the junctions
+   and the dielectric, coarse in the deep substrate - and a slider that
+   flattened them would produce a uniformly fine mesh nobody can afford, or
+   a uniformly coarse one that cannot resolve a 2 nm collar.
+   ========================================================================== */
+const MESH_ROWS = {
+  RS_global: '0.020 0.020 0.020 0.006 0.006 0.006',
+  RS_active: '0.005 0.002 0.005 0.003 0.001 0.003',
+  RS_junc:   '0.002 0.002 0.005 0.0015 0.001 0.003',
+  RS_well:   '0.020 0.010 0.008 0.008 0.004 0.004',
+  RS_sub:    '0.025 0.025 0.025 0.008 0.008 0.008',
+};
+const MESH_BASE_NM = 2;
+
+/** Mesh scale factor for the requested element size. */
+function meshScale(C) {
+  const nm = Number(C && C.MESH_NM);
+  if (!Number.isFinite(nm) || nm <= 0) return 1;
+  return nm / MESH_BASE_NM;
+}
+
+/** One (sdedr:define-refinement-size ...) line, scaled. */
+function rsLine(name, C) {
+  const lit = MESH_ROWS[name];
+  const k = meshScale(C);
+  if (k === 1) return `(sdedr:define-refinement-size "${name}" ${lit})`;
+  const vals = lit.split(/\s+/).map((v) => {
+    const x = parseFloat(v) * k;
+    // nothing useful below a tenth of a nanometre
+    return String(Number(Math.max(0.0001, x).toPrecision(3)));
+  });
+  return `(sdedr:define-refinement-size "${name}" ${vals.join(' ')})`;
+}
+
 /** A doping concentration in the 1e17 / 5e19 form SDE scripts use. */
 function conc(v) {
   if (!Number.isFinite(v)) return '0';
@@ -984,13 +1033,13 @@ function buildScm(G, meshPrefix, C) {
 ;; =====================================================================
 
 ;; ---- device-wide baseline ----
-(sdedr:define-refinement-size "RS_global" 0.020 0.020 0.020 0.006 0.006 0.006)
+${rsLine('RS_global', C)}
 (sdedr:define-refinement-window "RW_global" "Cuboid"
   (position x0 ysub0 zng0) (position x3 ygt1 zpg1))
 (sdedr:define-refinement-placement "RP_global" "RS_global" "RW_global")
 
 ;; ---- active stacks, one window per transistor ----
-(sdedr:define-refinement-size "RS_active" 0.005 0.002 0.005 ${n(C.MESH_MIN_X)} ${n(C.MESH_MIN_Y)} ${n(C.MESH_MIN_Z)})
+${rsLine('RS_active', C)}
 
 (sdedr:define-refinement-window "RW_actN" "Cuboid"
   (position (- x1 0.003) yl0 (- zng0 0.002))
@@ -1003,7 +1052,7 @@ function buildScm(G, meshPrefix, C) {
 (sdedr:define-refinement-placement "RP_actP" "RS_active" "RW_actP")
 
 ;; ---- junctions at the four gate edges ----
-(sdedr:define-refinement-size "RS_junc" 0.002 0.002 0.005 0.0015 0.001 ${n(C.MESH_MIN_Z)})
+${rsLine('RS_junc', C)}
 
 (sdedr:define-refinement-window "RW_jNs" "Cuboid"
   (position (- xg0 0.005) ya1 znh0) (position (+ xg0 0.005) yb3 znh1))
@@ -1022,13 +1071,13 @@ function buildScm(G, meshPrefix, C) {
 (sdedr:define-refinement-placement "RP_jPd" "RS_junc" "RW_jPd")
 
 ;; ---- well boundary : moderate refinement across the junction ----
-(sdedr:define-refinement-size "RS_well" 0.020 0.010 0.008 0.008 0.004 0.004)
+${rsLine('RS_well', C)}
 (sdedr:define-refinement-window "RW_well" "Cuboid"
   (position x0 ywell zng0) (position x3 ysub1 zpg1))
 (sdedr:define-refinement-placement "RP_well" "RS_well" "RW_well")
 
 ;; ---- deep substrate : coarse ----
-(sdedr:define-refinement-size "RS_sub" 0.025 0.025 0.025 0.008 0.008 0.008)
+${rsLine('RS_sub', C)}
 (sdedr:define-refinement-window "RW_sub" "Cuboid"
   (position x0 ysub0 zng0) (position x3 ywell zpg1))
 (sdedr:define-refinement-placement "RP_sub" "RS_sub" "RW_sub")
@@ -1228,17 +1277,17 @@ function buildFlatScm(G, meshPrefix, C) {
   push('');
 
   // ---- mesh ----
-  push('(sdedr:define-refinement-size "RS_global" 0.020 0.020 0.020 0.006 0.006 0.006)');
+  push(rsLine('RS_global', C));
   push(`(sdedr:define-refinement-window "RW_global" "Cuboid" (position ${n(G.x0)} ${n(G.ysub0)} ${n(G.zng0)}) (position ${n(G.x3)} ${n(G.ygt1)} ${n(G.zpg1)}))`);
   push('(sdedr:define-refinement-placement "RP_global" "RS_global" "RW_global")');
   push('');
-  push('(sdedr:define-refinement-size "RS_active" 0.005 0.002 0.005 0.003 0.001 0.003)');
+  push(rsLine('RS_active', C));
   push(`(sdedr:define-refinement-window "RW_actN" "Cuboid" (position ${n(G.x1 - 0.003)} ${n(G.yl0)} ${n(G.zng0 - 0.002)}) (position ${n(G.x2 + 0.003)} ${n(G.ygt1 + 0.002)} ${n(G.zng1 + 0.002)}))`);
   push('(sdedr:define-refinement-placement "RP_actN" "RS_active" "RW_actN")');
   push(`(sdedr:define-refinement-window "RW_actP" "Cuboid" (position ${n(G.x1 - 0.003)} ${n(G.yl0)} ${n(G.zpg0 - 0.002)}) (position ${n(G.x2 + 0.003)} ${n(G.ygt1 + 0.002)} ${n(G.zpg1 + 0.002)}))`);
   push('(sdedr:define-refinement-placement "RP_actP" "RS_active" "RW_actP")');
   push('');
-  push('(sdedr:define-refinement-size "RS_junc" 0.002 0.002 0.005 0.0015 0.001 0.003)');
+  push(rsLine('RS_junc', C));
   push(`(sdedr:define-refinement-window "RW_jNs" "Cuboid" (position ${n(G.xg0 - 0.005)} ${n(G.sheets[0].a)} ${n(G.znh0)}) (position ${n(G.xg0 + 0.005)} ${n(G.sheets[G.sheets.length - 1].b)} ${n(G.znh1)}))`);
   push('(sdedr:define-refinement-placement "RP_jNs" "RS_junc" "RW_jNs")');
   push(`(sdedr:define-refinement-window "RW_jNd" "Cuboid" (position ${n(G.xg1 - 0.005)} ${n(G.sheets[0].a)} ${n(G.znh0)}) (position ${n(G.xg1 + 0.006)} ${n(G.sheets[G.sheets.length - 1].b)} ${n(G.znh1)}))`);
@@ -1248,11 +1297,11 @@ function buildFlatScm(G, meshPrefix, C) {
   push(`(sdedr:define-refinement-window "RW_jPd" "Cuboid" (position ${n(G.xg1 - 0.005)} ${n(G.sheets[0].a)} ${n(G.zph0)}) (position ${n(G.xg1 + 0.006)} ${n(G.sheets[G.sheets.length - 1].b)} ${n(G.zph1)}))`);
   push('(sdedr:define-refinement-placement "RP_jPd" "RS_junc" "RW_jPd")');
   push('');
-  push('(sdedr:define-refinement-size "RS_well" 0.020 0.010 0.008 0.008 0.004 0.004)');
+  push(rsLine('RS_well', C));
   push(`(sdedr:define-refinement-window "RW_well" "Cuboid" (position ${n(G.x0)} ${n(G.ywell)} ${n(G.zng0)}) (position ${n(G.x3)} ${n(G.ysub1)} ${n(G.zpg1)}))`);
   push('(sdedr:define-refinement-placement "RP_well" "RS_well" "RW_well")');
   push('');
-  push('(sdedr:define-refinement-size "RS_sub" 0.025 0.025 0.025 0.008 0.008 0.008)');
+  push(rsLine('RS_sub', C));
   push(`(sdedr:define-refinement-window "RW_sub" "Cuboid" (position ${n(G.x0)} ${n(G.ysub0)} ${n(G.zng0)}) (position ${n(G.x3)} ${n(G.ywell)} ${n(G.zpg1)}))`);
   push('(sdedr:define-refinement-placement "RP_sub" "RS_sub" "RW_sub")');
   push('');
@@ -1787,6 +1836,8 @@ function doReset() {
   $('#mesh-prefix-mode').value = 'auto';
   $('#mesh-prefix-custom').value = 'fork1108';
   $('#scm-format').value = 'flat';
+  const ms = $('#mesh-slider');
+  if (ms) ms.value = '20';
   const col = $('#sel-colour');
   if (col) { col.value = 'material'; }
   if (window.Preview && window.Preview.setColorMode) window.Preview.setColorMode('material');
@@ -1848,6 +1899,30 @@ function initGenerator() {
     schedulePreview();
   });
   $('#mesh-prefix-custom').addEventListener('input', schedulePreview);
+  /* The slider and the number box are two views of one value: the slider is
+     in tenths of a nanometre so it can step finely near 1 nm without a
+     hundred-step range at the coarse end. */
+  const meshSlider = $('#mesh-slider');
+  const meshBox = $('#MESH_NM');
+  if (meshSlider && meshBox) {
+    const fromSlider = () => {
+      meshBox.value = (Number(meshSlider.value) / 10).toFixed(1);
+      if (imported.active) clearImport(false);
+      schedulePreview();
+      updateSweepCount();
+    };
+    const fromBox = () => {
+      const v = parseFloat(meshBox.value);
+      if (Number.isFinite(v)) {
+        meshSlider.value = String(Math.round(Math.max(0.5, Math.min(20, v)) * 10));
+      }
+      if (imported.active) clearImport(false);
+      schedulePreview();
+    };
+    meshSlider.addEventListener('input', fromSlider);
+    meshBox.addEventListener('input', fromBox);
+  }
+
   $('#scm-format').addEventListener('change', () => {
     // the script panel is already on screen; keep it in step with the choice
     refreshPreview();

@@ -389,11 +389,18 @@ the test that a template would fail.
 
 **Mesh size is an SCM control, not an SDevice one.** By the time SDevice
 runs, the mesh is already a `.tdr` file - refinement is defined in the SDE
-script. The slider therefore writes `sdedr:define-refinement-*` commands to
-paste into the SCM before meshing, rather than pretending to change
-something `sdevice.cmd` governs. It scales the bulk, the active band and
-the gate dielectric from one target size, and resolves the dielectric in Y
-against the thinnest dielectric region actually present.
+script. So there are two mesh controls, and they do different things:
+
+- **Generation options -> Mesh size** rewrites every
+  `sdedr:define-refinement-size` in the SCM this app generates. It is the
+  real control: change it and the mesh snmesh builds changes. The whole
+  table is scaled rather than flattened, so the ratios that carry the
+  refinement strategy survive - the junctions and the gate dielectric stay
+  finer than the bulk at every setting. 2 nm is the baseline and emits the
+  refinement lines unchanged, down to the trailing zeros.
+- **SDevice window -> Mesh size** is for a structure loaded from elsewhere.
+  It writes a refinement block to paste into that SCM before meshing,
+  since this app did not generate it and cannot rewrite it in place.
 
 Two notes on scope, because the honest answer is more useful than a
 plausible-looking number:

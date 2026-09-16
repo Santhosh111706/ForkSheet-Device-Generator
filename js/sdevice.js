@@ -323,19 +323,11 @@
 
     /* ---------------- header ---------------- */
     const mats = [...new Set(regions.map((r) => r.material))].sort();
-    P('*----------------------------------------------------------------------');
-    P('*  sdevice.cmd  --  generated from the loaded SCM structure');
-    P('*');
-    P(`*  Regions    ${regions.length}`);
-    P(`*  Materials  ${mats.join(', ')}`);
-    P(`*  Electrodes ${elec.length}  (${elec.map((e) => e.name).join(', ')})`);
-    if (analysis && analysis.architecture) {
-      P(`*  Detected   ${analysis.architecture.name}`);
-    }
-    P('*');
-    P('*  Every electrode below exists in the SCM. If you regenerate the mesh');
-    P('*  from a different structure, regenerate this file too.');
-    P('*----------------------------------------------------------------------');
+    P('*  sdevice.cmd  --  generated from ' + st.grid);
+    P(`*  ${regions.length} regions  |  ${mats.join(', ')}`);
+    P(`*  ${elec.length} electrodes: ${elec.map((e) => e.name).join(', ')}`);
+    if (analysis && analysis.architecture) P(`*  ${analysis.architecture.name}`);
+    P('*  Regenerate this file if the mesh is rebuilt from a different structure.');
     P('');
 
     /* ---------------- File ---------------- */
@@ -349,8 +341,6 @@
 
     /* ---------------- Electrode ---------------- */
     P('*  Every contact in the mesh must appear here or SDevice aborts.');
-    P('*  Electrodes not named in a Goal stay at 0 V, which is what keeps the');
-    P('*  idle device pinned while the other one is swept.');
     P('Electrode {');
     for (const e of elec) {
       const wf = st.workfunction[e.name];
@@ -363,20 +353,16 @@
 
     /* ---------------- Thermode ---------------- */
     if (st.thermal.enabled && st.thermal.thermode) {
-      P('*  The single heat sink. Every other contact is adiabatic: adding a');
-      P('*  second thermode beside one device would make it look cooler than');
-      P('*  the other for purely numerical reasons.');
+      P('*  Single heat sink; every other contact stays adiabatic.');
       P('Thermode {');
       P(`    { Name = "${st.thermal.thermode}"  Temperature = ${st.thermal.ambient}` +
-        `  SurfaceResistance = ${st.thermal.surfaceResistance} }`);
+        `  SurfaceResistance = ${Number(st.thermal.surfaceResistance).toFixed(1)} }`);
       P('}');
       P('');
     }
 
     /* ---------------- Physics ---------------- */
     const ph = st.physics;
-    P('*  One global block, so every region sees the same transport and');
-    P('*  recombination physics and the devices stay comparable.');
     P('Physics {');
     P(`    Temperature = ${st.temperature}`);
     if (ph.fermi) P('    Fermi');
@@ -425,8 +411,6 @@
     /* ---------------- CurrentPlot ---------------- */
     if (st.thermal.enabled) {
       const wanted = currentPlotRegions(regions, devs);
-      P('*  Per-region temperature, so each device hotspot is read directly');
-      P('*  and the two are never confused by a global maximum.');
       P('CurrentPlot {');
       P('    LatticeTemperature( Maximum( Material = "Silicon" )');
       P('                        Average( Material = "Silicon" ) )');
@@ -459,7 +443,7 @@
 
     /* ---------------- extraction notes ---------------- */
     P('');
-    P(...extractionNotes(st, devs, regions));
+    P(...extractionNotes(st, devs));
 
     return L.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n';
   }
@@ -560,41 +544,26 @@
     return L;
   }
 
-  function extractionNotes(st, devs, regions) {
+  /**
+   * Only the two notes that stop a wrong number being reported: the drain
+   * current sign, and what Rth does and does not mean here. Everything else
+   * an engineer can read off the deck itself.
+   */
+  function extractionNotes(st, devs) {
     const L = [];
-    L.push('*----------------------------------------------------------------------');
-    L.push('*  EXTRACTION');
-    L.push('*');
-    L.push('*  SDevice reports current flowing from a contact INTO the device as');
-    L.push('*  positive, so the two device types have opposite drain current signs.');
-    L.push('*  That is physics, not a labelling choice - do not plot |I| for both.');
-    L.push('*');
+    L.push('*  SDevice reports current INTO a contact as positive, so the two');
+    L.push('*  device types have opposite drain current signs:');
     for (const d of devs) {
-      const sign = d.tag === 'p' ? '-' : ' ';
-      L.push(`*    ID_${d.tag}  = ${sign}I(${d.drain.name})` +
-             (d.tag === 'p' ? '   a POSITIVE I(drain) here means the PMOS is not'
-                            : ''));
-      if (d.tag === 'p') L.push('*             working - check the body is pinned, not floating');
+      L.push(`*     ID_${d.tag} = ${d.tag === 'p' ? '-' : ' '}I(${d.drain.name})` +
+             (d.tag === 'p' ? '   a positive I(drain) here means the body is floating' : ''));
     }
-    L.push('*');
-    L.push(`*    Ion    ID at |VGS| = |VDS| = ${f(st.bias.vdd)} V   (*_idvg_sat_, last row)`);
-    L.push('*    Ioff   ID at VGS = 0                        (*_idvg_sat_)');
-    L.push('*    Vth    constant-current, same criterion for every device so the');
-    L.push('*           set stays comparable');
-    L.push('*    SS     min d|VGS| / d(log10|ID|)                  [mV/decade]');
-    L.push(`*    DIBL   ( |Vth_lin| - |Vth_sat| ) / ( ${f(st.bias.vdd)} - ${f(st.bias.vdlin)} )`);
     if (st.thermal.enabled) {
-      L.push('*    Tmax   LatticeTemperature Maximum(Region=...) per device');
-      L.push('*    dT     Tmax - ' + st.thermal.ambient);
-      L.push('*    Rth    dT / ( ID x VDS )                             [K/W]');
       L.push('*');
-      L.push('*  CAVEAT ON Rth: with adiabatic side walls the thermal resistance');
-      L.push('*  grows with the domain depth and does not converge, so Rth is a');
-      L.push('*  property of the simulation domain as much as of the device.');
-      L.push('*  Comparing two devices on the SAME domain is valid; quoting either');
-      L.push('*  as an absolute device parameter is not.');
+      L.push('*  Rth = dT / (ID x VDS). With adiabatic side walls it grows with the');
+      L.push('*  domain depth and does not converge, so it is a property of the');
+      L.push('*  domain as much as the device. Compare two devices on the same');
+      L.push('*  domain; do not quote it as an absolute.');
     }
-    L.push('*----------------------------------------------------------------------');
     return L;
   }
 
