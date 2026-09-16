@@ -7,17 +7,17 @@
    Everything runs client side. There is no Python, no Flask, no Node and no
    build step: the page can be opened from disk or served by GitHub Pages.
 
-   The Python file is the source of truth. Every formula in compute(), every
-   region in regionList(), every check in validate() and the whole SCM
-   template in buildScm() were carried across unchanged, so the same inputs
-   produce a byte-identical .scm file.
+   Every formula in compute(), every region in regionList() and every check
+   in validate() is carried across from the Python generator, so the same
+   inputs produce the same structure. The script itself is written out as
+   plain commands with literal coordinates - see buildFlatScm().
 
    Layout of this file
      1  constants and defaults
      2  compute()      every dependent coordinate
      3  regionList()   the regions, in SCM build order (110 at three sheets)
      4  validate()     input sanity plus 11 geometric checks
-     5  buildScm()     the SCM text
+     5  buildFlatScm() the SCM text
      6  file naming and download
      7  UI wiring, live preview updates, single case and sweep modes
    ========================================================================== */
@@ -681,514 +681,30 @@ function conc(v) {
   return s.replace(/^(\d)e/, '$1e');
 }
 
-function buildScm(G, meshPrefix, C) {
-  const N = G.sheets.length;
-  const ids = Array.from({ length: N }, (_, i) => String(i + 1));
-  const dose = (k) => (Number.isFinite(C[k]) ? C[k] : DEFAULT_DOPING[k]);
-
-  /* The sheet, collar and spacer calls repeat once per sheet, so they are
-     built here rather than written out three times in the template. */
-  const sheetCalls = ids.map((st) =>
-    `  (sheet-triplet tag "${st}" ya${st} yb${st} zca zcb)`).join('\n');
-  const stackCalls = ids.map((st) =>
-    `  (gate-stack tag "s${st}" ya${st} yb${st} zha zca zcb zhb)`).join('\n');
-  const interCalls = G.inter.map((b) =>
-    `  (sdegeo:create-cuboid (position xg0 yi${b.tag}_0 zha) (position xg1 yi${b.tag}_1 zhb)\n` +
-    `    "TiN" (string-append tag "_gate_inter${b.tag}"))`).join('\n');
-  const spacerMid = G.inter.map((b, i) =>
-    `  (sdegeo:create-cuboid (position xa yb${i + 1} zca) (position xb ya${i + 2} zcb)\n` +
-    `    "Si3N4" (string-append tag "_Sp" sp "_m${i + 1}"))`).join('\n');
-
-  const yDefs = [];
-  G.sheets.forEach((sh, i) => {
-    yDefs.push(`(define ya${i + 1}     ${n(sh.a)})`);
-    yDefs.push(`(define yb${i + 1}     ${n(sh.b)})`);
-  });
-  for (const b of G.inter) {
-    yDefs.push(`(define yi${b.tag}_0  ${n(b.lo)})`);
-    yDefs.push(`(define yi${b.tag}_1  ${n(b.hi)})`);
-  }
-
-  const dopePlacements = (tag) => {
-    const L = [];
-    L.push(`(sdedr:define-constant-profile-region "Pl_${tag}Src" "Prof_${tag}SD" "${tag}_Source")`);
-    L.push(`(sdedr:define-constant-profile-region "Pl_${tag}Drn" "Prof_${tag}SD" "${tag}_Drain")`);
-    L.push('');
-    for (const st of ids) {
-      L.push(`(sdedr:define-constant-profile-region "Pl_${tag}S${st}_eS" "Prof_${tag}Ext" "${tag}_Sheet${st}_extS")`);
-      L.push(`(sdedr:define-constant-profile-region "Pl_${tag}S${st}_eD" "Prof_${tag}Ext" "${tag}_Sheet${st}_extD")`);
-    }
-    L.push('');
-    for (const st of ids) {
-      L.push(`(sdedr:define-constant-profile-region "Pl_${tag}S${st}_ch" "Prof_${tag}Chan" "${tag}_Sheet${st}_chan")`);
-    }
-    return L.join('\n');
-  };
-
-  const topB = `yb${N}`;
-
-  return `;; =====================================================================
-;;  3D FORKSHEET CMOS  --  V13
-;;  NMOS  |  Si3N4 fork wall  |  PMOS
-;;  Sentaurus Structure Editor W-2024.09-SP1.  Units: micrometers.
-;;
-;;  AUTO-GENERATED.  Change the parameters in the generator and regenerate.
-;;
-;;  THIS CASE:
-;;      T_NS   = ${n(G.T_NS)}   nanosheet thickness   (Y extent of a sheet)
-;;      W_NS   = ${n(G.W_NS)}   nanosheet width       (Z extent of a sheet)
-;;      T_FORK = ${n(G.T_FORK)}   fork wall thickness   (nMOS-pMOS separation)
-;;      sheets = ${N}
-;;
-;;  ---------------------------------------------------------------
-;;  BODIES
-;;  ---------------------------------------------------------------
-;;    nFET body : Well_P   p, junction-isolates the n+ source/drain
-;;    pFET body : Well_N   n, junction-isolates the p+ source/drain
-;;
-;;    The nanosheet channels are released, undoped and have no contact of
-;;    their own -- electrically floating, like SOI.  That is inherent to
-;;    gate-all-around and is not a defect.  These well regions are NOT the
-;;    channel bodies; they isolate the source/drain pads and carry heat.
-;;
-;;  ---------------------------------------------------------------
-;;  CONTACTS  (EIGHT)
-;;  ---------------------------------------------------------------
-;;    source_n   n_Source     +Y      source_p   p_Source     +Y
-;;    drain_n    n_Drain      +Y      drain_p    p_Drain      +Y
-;;    gate_n     n_gate_top   +Y      gate_p     p_gate_top   +Y
-;;    substrate  Substrate_P  -Y      backside; also the THERMODE
-;;    nwell      Well_N       +Z      pFET body; tie to source_p
-;;
-;;    nwell sits on a DOMAIN BOUNDARY face, standing in for a real surface
-;;    tap.  Without it the pFET body floats and the parasitic PNP swamps
-;;    the channel current.  Its contact resistance is not physical; do not
-;;    read its current as a real quantity.
-;;
-;;  ---------------------------------------------------------------
-;;  SUBSTRATE DEPTH IS A THERMAL DOMAIN, NOT A WAFER THICKNESS
-;;  ---------------------------------------------------------------
-;;    t_domain = ${n(C.T_DOMAIN)} um.  The side walls are adiabatic, a dense-array
-;;    assumption: they act as symmetry planes between identical, equally
-;;    hot neighbours.  Under that assumption thermal resistance grows
-;;    LINEARLY with depth and never converges, so a deeper domain simply
-;;    reports a hotter device.  Justify it with a depth sweep and state the
-;;    side-wall assumption alongside any Rth you report.
-;;
-;;  ---------------------------------------------------------------
-;;  COORDINATE CONVENTION
-;;  ---------------------------------------------------------------
-;;    X = source -> drain transport direction
-;;    Y = vertical, nanosheet STACKING direction (substrate at -Y)
-;;    Z = nanosheet WIDTH, and the nMOS to pMOS separation direction
-;; =====================================================================
-
-(sde:clear)
-(sde:set-process-up-direction "+z")
-(sdegeo:set-default-boolean "ABA")
-
-
-;; =====================================================================
-;; 1. PARAMETERS
-;; =====================================================================
-
-;; ---- the three study parameters -------------------------------------
-(define T_NS      ${n(G.T_NS)})
-(define W_NS      ${n(G.W_NS)})
-(define t_wall    ${n(G.T_FORK)})
-
-;; ---- gate dielectric stack ------------------------------------------
-(define t_il      ${n(C.T_IL)})      ; interfacial SiO2, on the silicon
-(define t_hfo2    ${n(C.T_HFO2)})       ; HfO2, outside the IL
-(define t_diel    (+ t_il t_hfo2))
-
-;; ---- fixed design constants -----------------------------------------
-(define L_pad     ${n(C.L_PAD)})
-(define t_spacer  ${n(C.T_SPACER)})
-(define L_G       ${n(C.L_G)})
-(define t_metal   ${n(C.T_METAL)})
-(define t_liner   ${n(C.T_LINER)})
-(define t_bridge  ${n(C.T_BRIDGE)})       ; gate metal on the ONE open Z face
-(define t_domain  ${n(C.T_DOMAIN)})       ; SIMULATION DOMAIN depth
-(define t_well    ${n(C.T_WELL)})       ; retrograde well depth
-
-;; ---- X : source pad | spacer | gate | spacer | drain pad -------------
-(define x0   ${n(G.x0)})
-(define x1   ${n(G.x1)})
-(define xg0  ${n(G.xg0)})
-(define xg1  ${n(G.xg1)})
-(define x2   ${n(G.x2)})
-(define x3   ${n(G.x3)})
-
-;; ---- Y : vertical stacking ------------------------------------------
-(define yl0     ${n(G.yl0)})
-(define yl1     ${n(G.yl1)})
-(define ygb0    ${n(G.ygb0)})
-(define ygb1    ${n(G.ygb1)})
-(define y_pitch ${n(G.y_pitch)})
-${yDefs.join('\n')}
-(define ygt0    ${n(G.ygt0)})
-(define ygt1    ${n(G.ygt1)})
-(define ybr0    ${n(G.ybr0)})
-(define ybr1    ${n(G.ybr1)})
-(define y_sd0   ${n(G.y_sd0)})
-(define y_sd1   ${n(G.y_sd1)})
-(define ysub0   ${n(G.ysub0)})
-(define ywell   ${n(G.ywell)})
-(define ysub1   ${n(G.ysub1)})
-
-;; ---- Z : nMOS | fork wall | pMOS -------------------------------------
-;;   The gate metal wraps only the OUTER Z face of each device; on the
-;;   inner face the wall sits directly against the dielectric.  That is
-;;   what makes this a forksheet: each gate is three-sided and the wall,
-;;   not metal, sets the nMOS-to-pMOS spacing.
-(define zng0    ${n(G.zng0)})
-(define znh0    ${n(G.znh0)})
-(define znc0    ${n(G.znc0)})
-(define znc1    ${n(G.znc1)})
-(define znh1    ${n(G.znh1)})
-(define zng1    ${n(G.zng1)})
-(define zw0     ${n(G.zw0)})
-(define zw1     ${n(G.zw1)})
-(define zpg0    ${n(G.zpg0)})
-(define zph0    ${n(G.zph0)})
-(define zpc0    ${n(G.zpc0)})
-(define zpc1    ${n(G.zpc1)})
-(define zph1    ${n(G.zph1)})
-(define zpg1    ${n(G.zpg1)})
-(define z_well  ${n(G.z_well)})
-
-;; ---- DOPING PARAMETERS ----------------------------------------------
-(define N_sub    ${conc(dose('N_SUB'))})
-(define N_wellP  ${conc(dose('N_WELLP'))})
-(define N_wellN  ${conc(dose('N_WELLN'))})
-(define N_chan   ${conc(dose('N_CHAN'))})
-(define N_ext    ${conc(dose('N_EXT'))})
-(define N_sd     ${conc(dose('N_SD'))})
-
-
-;; =====================================================================
-;; 2. SUBSTRATE  --  three regions
-;;
-;;   One lightly doped p bulk carrying the backside contact, and two
-;;   retrograde wells meeting at the wall mid-plane.  The p/n well
-;;   junction isolates the two devices below Y = 0; the nitride wall
-;;   handles everything above it.
-;; =====================================================================
-
-(sdegeo:create-cuboid (position x0 ysub0 zng0) (position x3 ywell zpg1)
-  "Silicon" "Substrate_P")
-
-(sdegeo:create-cuboid (position x0 ywell zng0) (position x3 ysub1 z_well)
-  "Silicon" "Well_P")
-
-(sdegeo:create-cuboid (position x0 ywell z_well) (position x3 ysub1 zpg1)
-  "Silicon" "Well_N")
-
-
-;; =====================================================================
-;; 3. Si3N4 FORKSHEET WALL
-;; =====================================================================
-
-(sdegeo:create-cuboid (position x0 ysub1 zw0) (position x3 ygt1 zw1)
-  "Si3N4" "ForkWall")
-
-
-;; =====================================================================
-;; 4. BUILD HELPERS
-;; =====================================================================
-
-;; ---- gate dielectric stack around one nanosheet ---------------------
-;;   Eight disjoint slabs in two nested closed collars: the IL uses the
-;;   sheet faces, the HfO2 uses the IL outer faces.  Neither has a gap, so
-;;   no straight line leaves the silicon and reaches metal without
-;;   crossing both dielectrics.
-(define (gate-stack tag st ya yb zha zca zcb zhb)
-  (sdegeo:create-cuboid
-    (position xg0 (- ya t_il) (- zca t_il)) (position xg1 ya (+ zcb t_il))
-    "SiO2" (string-append tag "_IL_" st "_bot"))
-  (sdegeo:create-cuboid
-    (position xg0 yb (- zca t_il)) (position xg1 (+ yb t_il) (+ zcb t_il))
-    "SiO2" (string-append tag "_IL_" st "_top"))
-  (sdegeo:create-cuboid
-    (position xg0 ya (- zca t_il)) (position xg1 yb zca)
-    "SiO2" (string-append tag "_IL_" st "_zlo"))
-  (sdegeo:create-cuboid
-    (position xg0 ya zcb) (position xg1 yb (+ zcb t_il))
-    "SiO2" (string-append tag "_IL_" st "_zhi"))
-
-  (sdegeo:create-cuboid
-    (position xg0 (- ya t_il t_hfo2) zha) (position xg1 (- ya t_il) zhb)
-    "HfO2" (string-append tag "_HfO2_" st "_bot"))
-  (sdegeo:create-cuboid
-    (position xg0 (+ yb t_il) zha) (position xg1 (+ yb t_il t_hfo2) zhb)
-    "HfO2" (string-append tag "_HfO2_" st "_top"))
-  (sdegeo:create-cuboid
-    (position xg0 (- ya t_il) zha) (position xg1 (+ yb t_il) (- zca t_il))
-    "HfO2" (string-append tag "_HfO2_" st "_zlo"))
-  (sdegeo:create-cuboid
-    (position xg0 (- ya t_il) (+ zcb t_il)) (position xg1 (+ yb t_il) zhb)
-    "HfO2" (string-append tag "_HfO2_" st "_zhi"))
-)
-
-;; ---- Si3N4 spacer: disjoint pieces tiling one spacer window ----------
-;;   The _b, _m* and _t pieces are the inner spacers of a real GAA flow.
-(define (spacer-set tag sp xa xb zga zca zcb zgb)
-  (sdegeo:create-cuboid (position xa yl0 zga) (position xb ygt1 zca)
-    "Si3N4" (string-append tag "_Sp" sp "_zlo"))
-  (sdegeo:create-cuboid (position xa yl0 zcb) (position xb ygt1 zgb)
-    "Si3N4" (string-append tag "_Sp" sp "_zhi"))
-  (sdegeo:create-cuboid (position xa yl0 zca) (position xb ya1 zcb)
-    "Si3N4" (string-append tag "_Sp" sp "_b"))
-${spacerMid}
-  (sdegeo:create-cuboid (position xa ${topB} zca) (position xb ygt1 zcb)
-    "Si3N4" (string-append tag "_Sp" sp "_t"))
-)
-
-;; ---- one nanosheet, split into three abutting regions in X ----------
-(define (sheet-triplet tag st ya yb zca zcb)
-  (sdegeo:create-cuboid (position x1 ya zca) (position xg0 yb zcb)
-    "Silicon" (string-append tag "_Sheet" st "_extS"))
-  (sdegeo:create-cuboid (position xg0 ya zca) (position xg1 yb zcb)
-    "Silicon" (string-append tag "_Sheet" st "_chan"))
-  (sdegeo:create-cuboid (position xg1 ya zca) (position x2 yb zcb)
-    "Silicon" (string-append tag "_Sheet" st "_extD"))
-)
-
-;; ---- one complete transistor ----------------------------------------
-;;   TiN gate.  The single bridge spans the whole stack height, so bottom,
-;;   every inter slab and top all reach each other through it.
-(define (build-mosfet tag zga zha zca zcb zhb zgb br zbr0 zbr1)
-
-  (sdegeo:create-cuboid (position xg0 yl0 zga) (position xg1 yl1 zgb)
-    "SiO2" (string-append tag "_GateLiner"))
-
-  (sdegeo:create-cuboid (position x0 y_sd0 zga) (position x1 y_sd1 zgb)
-    "Silicon" (string-append tag "_Source"))
-  (sdegeo:create-cuboid (position x2 y_sd0 zga) (position x3 y_sd1 zgb)
-    "Silicon" (string-append tag "_Drain"))
-
-${sheetCalls}
-
-${stackCalls}
-
-  (sdegeo:create-cuboid (position xg0 ygb0 zga) (position xg1 ygb1 zgb)
-    "TiN" (string-append tag "_gate_bottom"))
-  (sdegeo:create-cuboid (position xg0 ybr0 zbr0) (position xg1 ybr1 zbr1)
-    "TiN" (string-append tag "_gate_bridge_" br))
-${interCalls}
-  (sdegeo:create-cuboid (position xg0 ygt0 zga) (position xg1 ygt1 zgb)
-    "TiN" (string-append tag "_gate_top"))
-
-  (spacer-set tag "S" x1  xg0 zga zca zcb zgb)
-  (spacer-set tag "D" xg1 x2  zga zca zcb zgb)
-)
-
-
-;; =====================================================================
-;; 5. THE TWO TRANSISTORS
-;; =====================================================================
-
-(build-mosfet "n" zng0 znh0 znc0 znc1 znh1 zng1 "L" zng0 znh0)
-(build-mosfet "p" zpg0 zph0 zpc0 zpc1 zph1 zpg1 "R" zph1 zpg1)
-
-
-;; =====================================================================
-;; 6. DOPING  --  REGION-BASED THROUGHOUT
-;;
-;;   The channel is effectively undoped.  At 3e17 a 20 x 6 x 30 nm channel
-;;   holds about one dopant atom, so the threshold would be a single-atom
-;;   lottery; with an undoped channel Vt comes from the gate workfunction,
-;;   set on the gate electrodes in sdevice.cmd.
-;; =====================================================================
-
-(sdedr:define-constant-profile "Prof_Sub"     "BoronActiveConcentration"      N_sub)
-(sdedr:define-constant-profile "Prof_WellP"   "BoronActiveConcentration"      N_wellP)
-(sdedr:define-constant-profile "Prof_WellN"   "PhosphorusActiveConcentration" N_wellN)
-
-(sdedr:define-constant-profile "Prof_nChan"   "BoronActiveConcentration"      N_chan)
-(sdedr:define-constant-profile "Prof_nExt"    "ArsenicActiveConcentration"    N_ext)
-(sdedr:define-constant-profile "Prof_nSD"     "ArsenicActiveConcentration"    N_sd)
-
-(sdedr:define-constant-profile "Prof_pChan"   "PhosphorusActiveConcentration" N_chan)
-(sdedr:define-constant-profile "Prof_pExt"    "BoronActiveConcentration"      N_ext)
-(sdedr:define-constant-profile "Prof_pSD"     "BoronActiveConcentration"      N_sd)
-
-;; ---- substrate -------------------------------------------------------
-(sdedr:define-constant-profile-region "Pl_Sub"   "Prof_Sub"   "Substrate_P")
-(sdedr:define-constant-profile-region "Pl_WellP" "Prof_WellP" "Well_P")
-(sdedr:define-constant-profile-region "Pl_WellN" "Prof_WellN" "Well_N")
-
-;; ---- nMOS ------------------------------------------------------------
-${dopePlacements('n')}
-
-;; ---- pMOS ------------------------------------------------------------
-${dopePlacements('p')}
-
-
-;; =====================================================================
-;; 7. CONTACTS  (EIGHT)
-;; =====================================================================
-
-(define znc_mid (/ (+ znc0 znc1) 2))
-(define zpc_mid (/ (+ zpc0 zpc1) 2))
-
-(sdegeo:define-contact-set "source_n"  4.0 (color:rgb 1.00 0.55 0.10) "##")
-(sdegeo:define-contact-set "drain_n"   4.0 (color:rgb 0.10 0.45 0.95) "##")
-(sdegeo:define-contact-set "gate_n"    4.0 (color:rgb 0.90 0.10 0.10) "##")
-(sdegeo:define-contact-set "source_p"  4.0 (color:rgb 0.95 0.80 0.15) "##")
-(sdegeo:define-contact-set "drain_p"   4.0 (color:rgb 0.55 0.20 0.75) "##")
-(sdegeo:define-contact-set "gate_p"    4.0 (color:rgb 0.85 0.35 0.55) "##")
-(sdegeo:define-contact-set "substrate" 4.0 (color:rgb 0.55 0.55 0.60) "##")
-(sdegeo:define-contact-set "nwell"     4.0 (color:rgb 0.35 0.65 0.45) "##")
-
-(sdegeo:set-current-contact-set "source_n")
-(sdegeo:set-contact-faces
-  (find-face-id (position (/ (+ x0 x1) 2) y_sd1 znc_mid)) "source_n")
-
-(sdegeo:set-current-contact-set "drain_n")
-(sdegeo:set-contact-faces
-  (find-face-id (position (/ (+ x2 x3) 2) y_sd1 znc_mid)) "drain_n")
-
-(sdegeo:set-current-contact-set "gate_n")
-(sdegeo:set-contact-faces
-  (find-face-id (position (/ (+ xg0 xg1) 2) ygt1 znc_mid)) "gate_n")
-
-(sdegeo:set-current-contact-set "source_p")
-(sdegeo:set-contact-faces
-  (find-face-id (position (/ (+ x0 x1) 2) y_sd1 zpc_mid)) "source_p")
-
-(sdegeo:set-current-contact-set "drain_p")
-(sdegeo:set-contact-faces
-  (find-face-id (position (/ (+ x2 x3) 2) y_sd1 zpc_mid)) "drain_p")
-
-(sdegeo:set-current-contact-set "gate_p")
-(sdegeo:set-contact-faces
-  (find-face-id (position (/ (+ xg0 xg1) 2) ygt1 zpc_mid)) "gate_p")
-
-(sdegeo:set-current-contact-set "substrate")
-(sdegeo:set-contact-faces
-  (find-face-id (position (/ (+ x0 x3) 2) ysub0 znc_mid)) "substrate")
-
-;;  On the +Z face of Well_N.  A DOMAIN BOUNDARY face standing in for a
-;;  real n+ surface tap, which has no room here because S/D pads, liner
-;;  and spacers cover the whole n-well top face.
-;;  Tie this electrode to source_p in sdevice.cmd.
-(sdegeo:set-current-contact-set "nwell")
-(sdegeo:set-contact-faces
-  (find-face-id (position (/ (+ x0 x3) 2) (/ (+ ywell ysub1) 2) zpg1)) "nwell")
-
-
-;; =====================================================================
-;; 8. MESH
-;;
-;;   The thinnest feature is the interfacial layer, so the dielectric
-;;   stack needs its own window with a sub-nanometre Y minimum.  RS_diel
-;;   is deliberately anisotropic: fine in Y where the thin layers stack,
-;;   coarse in X and Z where nothing is thin.
-;; =====================================================================
-
-${rsLine('RS_global', C)}
-(sdedr:define-refinement-window "RW_global" "Cuboid"
-  (position x0 ysub0 zng0) (position x3 ygt1 zpg1))
-(sdedr:define-refinement-placement "RP_global" "RS_global" "RW_global")
-
-${rsLine('RS_active', C)}
-(sdedr:define-refinement-window "RW_actN" "Cuboid"
-  (position (- x1 0.003) yl0 (- zng0 0.002))
-  (position (+ x2 0.003) (+ ygt1 0.002) (+ zng1 0.002)))
-(sdedr:define-refinement-placement "RP_actN" "RS_active" "RW_actN")
-
-(sdedr:define-refinement-window "RW_actP" "Cuboid"
-  (position (- x1 0.003) yl0 (- zpg0 0.002))
-  (position (+ x2 0.003) (+ ygt1 0.002) (+ zpg1 0.002)))
-(sdedr:define-refinement-placement "RP_actP" "RS_active" "RW_actP")
-
-;; ---- gate dielectric stack : sub-nanometre in Y only ----
-${rsLine('RS_diel', C)}
-(sdedr:define-refinement-window "RW_dielN" "Cuboid"
-  (position xg0 (- ya1 t_diel) znh0) (position xg1 (+ ${topB} t_diel) znh1))
-(sdedr:define-refinement-placement "RP_dielN" "RS_diel" "RW_dielN")
-
-(sdedr:define-refinement-window "RW_dielP" "Cuboid"
-  (position xg0 (- ya1 t_diel) zph0) (position xg1 (+ ${topB} t_diel) zph1))
-(sdedr:define-refinement-placement "RP_dielP" "RS_diel" "RW_dielP")
-
-${rsLine('RS_junc', C)}
-(sdedr:define-refinement-window "RW_jNs" "Cuboid"
-  (position (- xg0 0.005) ya1 znh0) (position (+ xg0 0.005) ${topB} znh1))
-(sdedr:define-refinement-placement "RP_jNs" "RS_junc" "RW_jNs")
-
-(sdedr:define-refinement-window "RW_jNd" "Cuboid"
-  (position (- xg1 0.005) ya1 znh0) (position (+ xg1 0.006) ${topB} znh1))
-(sdedr:define-refinement-placement "RP_jNd" "RS_junc" "RW_jNd")
-
-(sdedr:define-refinement-window "RW_jPs" "Cuboid"
-  (position (- xg0 0.005) ya1 zph0) (position (+ xg0 0.005) ${topB} zph1))
-(sdedr:define-refinement-placement "RP_jPs" "RS_junc" "RW_jPs")
-
-(sdedr:define-refinement-window "RW_jPd" "Cuboid"
-  (position (- xg1 0.005) ya1 zph0) (position (+ xg1 0.006) ${topB} zph1))
-(sdedr:define-refinement-placement "RP_jPd" "RS_junc" "RW_jPd")
-
-;; ---- fork wall and its trench ----
-${rsLine('RS_wall', C)}
-(sdedr:define-refinement-window "RW_wall" "Cuboid"
-  (position x0 (- ysub1 0.010) (- zw0 0.002)) (position x3 ygt1 (+ zw1 0.002)))
-(sdedr:define-refinement-placement "RP_wall" "RS_wall" "RW_wall")
-
-;; ---- well band : resolve the n+/well and well/well junctions ----
-${rsLine('RS_well', C)}
-(sdedr:define-refinement-window "RW_wellTop" "Cuboid"
-  (position x0 ywell zng0) (position x3 ysub1 zpg1))
-(sdedr:define-refinement-placement "RP_wellTop" "RS_well" "RW_wellTop")
-
-${rsLine('RS_sub', C)}
-(sdedr:define-refinement-window "RW_sub" "Cuboid"
-  (position x0 ysub0 zng0) (position x3 ywell zpg1))
-(sdedr:define-refinement-placement "RP_sub" "RS_sub" "RW_sub")
-
-
-;; =====================================================================
-;; 9. BUILD
-;;     Writes ${meshPrefix}_msh.tdr
-;; =====================================================================
-
-(sde:build-mesh "snmesh" "" "${meshPrefix}")
-`;
-}
-
-
 /* ==========================================================================
-   5a. STEP-BY-STEP EMITTER
+   5. SCM EMITTER
    --------------------------------------------------------------------------
-   buildScm() writes the structure the way the Python generator does: three
-   helper procedures, each called twice, once per transistor. That is compact
-   and it is how the file is maintained, but it does not read like something
-   you would type into a Sentaurus script window - you cannot point at a line
-   and say "this creates the nMOS gate bridge", because the line that does it
-   runs twice with different arguments.
+   One output style, and no option to change it: every cuboid as its own
+   create-cuboid call, in build order, named, with literal coordinates. No
+   helper procedures, no (define ...) block, no comments - grouped only by
+   blank lines, in the order a device is actually built: geometry, doping,
+   contacts, mesh, build.
 
-   This emitter writes the same structure out flat: every cuboid as its own
-   create-cuboid call, in build order, named. No procedures, no comments,
-   grouped only by blank lines, in the order a device is actually built -
-   parameters, geometry, doping, contacts, mesh, build.
-
-   The geometry is NOT recomputed here. The coordinates are the same symbols
-   buildScm() uses, so the two emitters cannot drift apart silently: the test
-   harness parses the output of this function and asserts the resulting
-   region list matches regionList() exactly, name, material and all six
-   bounds. A change here that moved anything would fail that comparison.
+   The geometry is NOT rebuilt here. Every region comes straight from
+   regionList(), so there is one source of truth for the build order and no
+   second copy that could drift. The test harness parses this function's
+   output and asserts the resulting region list matches regionList() exactly
+   - name, material and all six bounds - so a change that moved anything
+   would fail that comparison.
    ========================================================================== */
 
 /**
  * `(sdegeo:create-cuboid (position ...) (position ...) "Mat" "Name")`
  *
- * Coordinates are literal numbers. An earlier version emitted the symbol
- * names and a block of (define ...) lines above them, which is how the V8
- * template is written - but a define block is a program, not a script you
- * could have typed. The structured formats still carry it; this one does
- * not, so every line stands on its own.
+ * Coordinates are literal numbers. An earlier version emitted symbol names
+ * with a block of (define ...) lines above them - but a define block is a
+ * program, not a script you could have typed, so every line here stands on
+ * its own instead.
  */
 function cuboid(name, material, ax, bx, ay, by, az, bz) {
   return `(sdegeo:create-cuboid (position ${n(ax)} ${n(ay)} ${n(az)}) ` +
@@ -1373,97 +889,21 @@ function buildFlatScm(G, meshPrefix, C) {
 }
 
 
-/* ==========================================================================
-   5b. COMMENT STRIPPING
-   --------------------------------------------------------------------------
-   buildScm() above is left exactly as the Python generator writes it, banner
-   comments and all. Stripping happens here instead, as a separate pass, so
-   the fully annotated V8 text stays available and the emitter itself never
-   has to know about the option.
-   ========================================================================== */
-
-/**
- * Remove Scheme comments from SCM text.
- *
- * This walks each line character by character rather than using a regex,
- * because a `;` inside a string literal is data, not a comment. The custom
- * mesh prefix is user-supplied and lands inside a quoted string, so a naive
- * /;.*$/ would happily truncate `(sde:build-mesh "snmesh" "" "a;b")` into
- * broken Scheme.
- *
- * Whole-line comments disappear entirely; trailing comments are cut off and
- * the remaining code keeps its indentation. Runs of blank lines left behind
- * by the removed banner blocks collapse to a single blank line, so the
- * result reads as grouped sections rather than scattered code.
- */
-function stripScmComments(text) {
-  const lines = [];
-
-  for (const raw of String(text).split('\n')) {
-    let inString = false;
-    let cut = -1;
-
-    for (let i = 0; i < raw.length; i++) {
-      const ch = raw[i];
-      if (inString) {
-        if (ch === '\\') { i++; continue; }   // escaped char, skip it
-        if (ch === '"') inString = false;
-      } else if (ch === '"') {
-        inString = true;
-      } else if (ch === ';') {
-        cut = i;
-        break;
-      }
-    }
-
-    const code = (cut >= 0 ? raw.slice(0, cut) : raw).replace(/[ \t]+$/, '');
-    lines.push(code);
-  }
-
-  // collapse blank runs, drop leading blanks, end with exactly one newline
-  const out = [];
-  for (const line of lines) {
-    if (line === '' && (out.length === 0 || out[out.length - 1] === '')) continue;
-    out.push(line);
-  }
-  while (out.length && out[out.length - 1] === '') out.pop();
-  return out.join('\n') + '\n';
-}
-
-/** Which of the three output styles the user picked. */
-function scmFormat() {
-  if (typeof document === 'undefined') return 'flat';
-  const el = document.getElementById('scm-format');
-  return el ? el.value : 'flat';
-}
-
 /**
  * The single place the rest of the UI asks for SCM text.
  *
- *   flat        every command written out one by one, no comments. The
- *               default, and what you would type into a script window.
- *   structured  the same device via its helper procedures, comments removed
- *   annotated   those procedures exactly as the Python generator writes them
+ * There is one output style and no option to change it: every command
+ * written out one by one, literal numbers, no comments and no (define ...)
+ * block - a script you could have typed into a Sentaurus script window
+ * rather than a program that computes one.
  *
- * All three describe the same device; buildScm() and buildFlatScm() are kept
- * in step by a test that parses both and compares the region lists.
+ * An earlier version also offered the Python generator's helper procedures,
+ * with and without their banner comments. Those carried a define block whose
+ * symbols had to be kept in step with the geometry by hand, and they were
+ * written for exactly three sheets. Both are gone.
  */
-function emitScm(g, meshPrefix, C, format) {
-  let mode = format || scmFormat();
-  /* buildScm() is the V8 template: its helper procedures and its
-     (define ya1 ...) block are written for exactly three sheets. Rather
-     than emit a file whose defines disagree with its geometry, anything
-     other than three falls back to the step-by-step emitter, which builds
-     from the sheet list and has no such assumption. */
-  if (mode !== 'flat' && g.sheets && g.sheets.length !== 3) mode = 'flat';
-  if (mode === 'annotated') return buildScm(g, meshPrefix, C);
-  if (mode === 'structured') return stripScmComments(buildScm(g, meshPrefix, C));
+function emitScm(g, meshPrefix, C) {
   return buildFlatScm(g, meshPrefix, C);
-}
-
-/** True when the chosen format cannot represent the current stack. */
-function formatForcedFlat(g) {
-  return scmFormat() !== 'flat' && g && g.sheets && g.sheets.length !== 3;
 }
 
 
@@ -1683,14 +1123,6 @@ function refreshPreview() {
     }
   }
 
-  if (formatForcedFlat(res.g)) {
-    const note = $('#scm-format');
-    if (note) {
-      setStatus('warn', `Step-by-step output (stack is ${res.g.sheets.length} sheets)`,
-        msg.concat(['the structured V8 formats are written for 3 sheets, so ' +
-                    'this stack is emitted step-by-step instead']));
-    }
-  }
 }
 
 /* ---------------------------------------------------------------- actions */
@@ -1896,7 +1328,6 @@ function doReset() {
   $('#gen-mode').value = 'single';
   $('#mesh-prefix-mode').value = 'auto';
   $('#mesh-prefix-custom').value = 'fork1108';
-  $('#scm-format').value = 'flat';
   const ms = $('#mesh-slider');
   if (ms) ms.value = '20';
   const col = $('#sel-colour');
@@ -1984,11 +1415,6 @@ function initGenerator() {
     meshBox.addEventListener('input', fromBox);
   }
 
-  $('#scm-format').addEventListener('change', () => {
-    // the script panel is already on screen; keep it in step with the choice
-    refreshPreview();
-    if (app.lastScm) doGenerate();
-  });
   $('#gen-mode').addEventListener('change', onModeChange);
 
   // every sweep control refreshes the case count, so a full grid can never
@@ -2044,7 +1470,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /* expose for preview.js and for console debugging */
 window.Generator = {
-  compute, regionList, validate, buildScm, buildFlatScm, emitScm, stripScmComments,
+  compute, regionList, validate, buildFlatScm, emitScm,
   caseName, materialColor, n,
   DEFAULT_PARAMS, DEFAULT_CONSTANTS, DEFAULT_DOPING,
 };

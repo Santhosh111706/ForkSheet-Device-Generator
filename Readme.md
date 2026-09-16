@@ -12,12 +12,11 @@ domain, a single asymmetric gate bridge per transistor, and an n-well tap so
 the pFET body is not left floating. The generated `.scm` files are compatible
 with the SCM Device Viewer project.
 
-Output is a **step-by-step script** by default: every command written out one
-by one, no comments and no `(define ...)` block - each coordinate is a literal
+Output is a **step-by-step script**: every command written out one by one,
+no comments and no `(define ...)` block - each coordinate is a literal
 number, so every line stands on its own. The order is the order a device is
-built: geometry, doping, contacts, mesh, build. Two structured formats keeping
-the helper procedures and their defines are also available under Generation
-options. All three describe the same device.
+built: geometry, doping, contacts, mesh, build. That is the only output
+style; there is no option to emit helper procedures or a define block.
 
 It also **reads** SDE: open an `.scm` file, paste commands, or drag a file onto
 the page. The input is recognised by its content, so a saved file and a pasted
@@ -54,8 +53,6 @@ Everything runs in the browser.
 - Any subset of seven variables can be swept - the six above plus
   `T_FORK` - each with its own value list, with a live case count
 - Mesh prefix `auto` or a fixed custom name
-- Three output formats: step-by-step commands (default), the helper
-  procedures, or those procedures with their comments
 - A mesh size control that rescales every refinement in the emitted script,
   preserving the ratios between them so the channel, the dielectric
   interfaces and the source/drain junctions stay finer than the bulk
@@ -228,7 +225,7 @@ project/
 ├── css/
 │   └── style.css       dark engineering / TCAD interface
 └── js/
-    ├── generator.js    compute, validate, buildScm, buildFlatScm, import, layout
+    ├── generator.js    compute, validate, buildFlatScm, import, layout
     ├── sde-parser.js   reader and evaluator for SDE text; window.SDE
     ├── analyze.js      parameter extraction + consistency check; window.SDEAnalyze
     ├── sdevice.js      sdevice.cmd from a parsed structure; window.SDevice
@@ -277,9 +274,7 @@ sub-path alike.
    comma-separated list, and press **Download all cases**. The case count
    updates live. Files download one after another with a short gap, since
    browsers throttle rapid successive downloads.
-6. Change **Output format** if you want one of the structured forms rather
-   than the default step-by-step script.
-7. Press **Reset** to restore every default.
+6. Press **Reset** to restore every default.
 
 To read an existing script instead, open the **Import SDE / SCM** panel,
 press **Open** in the header, or drag a file onto the page.
@@ -299,42 +294,28 @@ without change in behaviour:
 | `compute(t_ns, w_ns, t_fork)` | `compute(t_ns, w_ns, t_fork, C)` |
 | `region_list(g)` | `regionList(g, C)` |
 | `validate(...)` | `validate(...)` |
-| `build_scm(g, mesh_prefix)` | `buildScm(G, meshPrefix, C)` |
+| `build_scm(g, mesh_prefix)` | `buildFlatScm(G, meshPrefix, C)` |
 | (n/a - browser-only) | `buildFlatScm()` step-by-step emitter |
-| (n/a - browser-only) | `stripScmComments()`, `emitScm()` |
+| (n/a - browser-only) | `emitScm()` |
 | (n/a - browser-only) | `window.SDE.parse()` / `.detect()` / `.format()` |
 | (n/a - browser-only) | `window.SDEAnalyze.analyze()` / `.check()` |
 | `case_name(...)` | `caseName(...)` |
 | `n(v)` number formatter | `n(v)` |
 | `SWEEP_MODE` one_at_a_time / full_grid | Mode dropdown |
 
-The SCM template was converted mechanically from the Python f-string rather
-than retyped; the original port was diffed byte for byte against the Python
-output. `buildScm()` is still that verbatim emitter. Comment stripping is a
-separate pass in `stripScmComments()`, applied afterwards by `emitScm()`, so
-the annotated text is never altered - only optionally reduced.
+There is one emitter, `buildFlatScm()`, and it writes geometry straight from
+`regionList()` - so the build order has a single source of truth rather than
+a template kept in step with it by hand.
 
-Current output, measured at the default geometry. Every format produces
-110 regions, 5 materials, 8 contacts, 25 doping placements and 31
-refinements:
-
-| format | lines | bytes | defines |
-|---|---|---|---|
-| step-by-step (default) | 224 | 18513 | 0 |
-| structured | 323 | 13293 | 71 |
-| annotated | 472 | 20899 | 71 |
-
-The step-by-step script has no define block, so it is shorter in lines than
-the annotated one but longer in bytes than the structured one: each cuboid
-carries its own literal coordinates instead of naming a symbol. It is the
-same 110 regions either way.
+Current output at the default geometry: **224 lines, 18513 bytes, zero
+`(define ...)` lines and zero comments**, giving 110 regions, 5 materials,
+8 contacts, 25 doping placements and 31 refinements.
 
 The region count scales with the sheet count: 54 regions at one nanosheet,
-110 at three, 250 at eight. The structured and annotated formats assume
-three sheets, so any other count falls back to the step-by-step emitter
-rather than emit a define block that disagrees with its own geometry.
+110 at three, 250 at eight. Nothing in the output assumes three sheets,
+because nothing in it is a symbol - every coordinate is a literal.
 
-All fourteen parametric inputs can be recovered from a step-by-step file by
+All fourteen parametric inputs can be recovered from a generated file by
 measurement alone - `T_NS`, `W_NS`, `T_FORK`, `L_G`, `T_SPACER`, `L_PAD`,
 `N_SHEETS`, `T_IL`, `T_HFO2`, `T_METAL`, `T_LINER`, `T_BRIDGE`, `T_DOMAIN`,
 `T_WELL` - checked exactly against the values the generator was given.
@@ -342,13 +323,13 @@ The interfacial layer and the gate liner are both SiO<sub>2</sub> and the
 interfacial layer is the thinner of the two, so they are told apart by
 geometry: the interfacial oxide is the one built against the high-k.
 
-Equivalence is not asserted, it is checked. The test parses the step-by-step
-output and the annotated output with `window.SDE` and compares the resulting
-region lists - name, material and all six bounds - plus the doping
-placements, contacts, refinements and mesh prefix. It also compares the
-step-by-step regions against `regionList()` directly. Parentheses stay
-balanced, every line is a complete command, and no `;` survives in the
-comment-free formats, including when a custom mesh prefix contains one.
+Equivalence is not asserted, it is checked. The test parses the generated
+output with `window.SDE` and compares the resulting region list - name,
+material and all six bounds - against `regionList()` directly, and against
+the reference V13 script, including its doping placements, profiles,
+contacts and refinements. Parentheses stay balanced, every line is a
+complete command, and no `;` and no `(define` survive, including when a
+custom mesh prefix contains a semicolon.
 
 **Sweep case counts.** The original three-variable sweep is unchanged: 8
 for one-at-a-time, 27 for the full grid over `T_NS`, `W_NS` and `T_FORK`.
