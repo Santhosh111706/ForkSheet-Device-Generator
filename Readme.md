@@ -60,6 +60,17 @@ Everything runs in the browser.
 
 **SDevice**
 
+Checked against the Sentaurus Device tutorial and user guide, and the deck
+now covers: the `File` section including the `Parameter` .par file;
+per-electrode `Voltage`, `Workfunction`, `Resistor`, `Schottky` and
+`Barrier`; drift-diffusion, Thermodynamic and Hydrodynamic transport;
+mobility, recombination, bandgap-narrowing, interface and tunnelling
+models; the full `Plot` dataset list including driving forces and
+generation; `Math` with `ErrRef`, `Number_Of_Threads`, `Transient` scheme
+and `PlotExplicit`; and `Solve` with `Quasistationary` (including
+`Decrement`), `Transient`, `ACCoupled` small-signal, and current-driven
+sweeps via `set(... mode current)`.
+
 - A **Generate SDevice** button opens a separate window: load or paste an
   SCM, analyze it, configure, generate `sdevice.cmd`, validate, edit, export
 - The deck is built from the **parsed structure, not a template**. Every

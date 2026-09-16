@@ -11,7 +11,7 @@
 <!-- Bump ?v= on every edit to css/ or js/. index.html and the scripts are
      cached independently, so a new page paired with an old script silently
      kills init: one missing element and nothing after it runs. -->
-<link rel="stylesheet" href="css/style.css?v=v13-6">
+<link rel="stylesheet" href="css/style.css?v=v13-7">
 
 <!--
   Three.js is loaded as a classic (non-module) script from a CDN.
@@ -669,6 +669,11 @@
               </div>
             </div>
             <button id="sdev-analyze" class="btn primary" type="button" style="width:100%">Analyze structure</button>
+            <div class="field" style="margin-top:10px">
+              <label for="ou-parfile">Parameter file (File &rarr; Parameter)</label>
+              <div class="ctl"><input id="ou-parfile" type="text" placeholder="e.g. models.par"></div>
+              <small>Where material and model parameters are overridden. Left blank, no Parameter line is written &mdash; pointing at a file that does not exist is fatal.</small>
+            </div>
             <div id="sdev-struct" class="import-status">Nothing loaded.</div>
           </div>
         </div>
@@ -724,6 +729,16 @@
             <div class="field"><label class="chk-field"><input type="checkbox" id="ph-surfsrh"><span>Interface: SurfaceSRH at the gate dielectric</span></label></div>
             <div class="field"><label class="chk-field"><input type="checkbox" id="ph-quantum"><span>Quantum potential correction</span></label></div>
             <div class="grid2">
+              <div class="field compact">
+                <label for="ph-transport">Transport model</label>
+                <div class="ctl">
+                  <select id="ph-transport">
+                    <option value="dd">Drift-diffusion</option>
+                    <option value="thermodynamic">Thermodynamic</option>
+                    <option value="hydrodynamic">Hydrodynamic</option>
+                  </select>
+                </div>
+              </div>
               <div class="field compact">
                 <label for="ph-bgn">Bandgap narrowing</label>
                 <div class="ctl">
@@ -836,10 +851,32 @@
                 </div>
               </div>
             </div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ac-on"><span>Small-signal AC sweep (Cgg, Cgd, ft)</span></label></div>
+            <div id="ac-opts" hidden>
+              <div class="grid2">
+                <div class="field compact">
+                  <label for="ac-start">Start frequency</label>
+                  <div class="ctl"><input id="ac-start" type="number" step="1e3" value="1000"><span class="unit">Hz</span></div>
+                </div>
+                <div class="field compact">
+                  <label for="ac-end">End frequency</label>
+                  <div class="ctl"><input id="ac-end" type="number" step="1e6" value="1000000000"><span class="unit">Hz</span></div>
+                </div>
+                <div class="field compact">
+                  <label for="ac-pts">Points per decade</label>
+                  <div class="ctl"><input id="ac-pts" type="number" step="1" value="5"></div>
+                </div>
+              </div>
+            </div>
             <div class="field" style="margin-top:8px">
               <label>Starting potential per electrode</label>
               <div id="bi-electrodes"><p class="note">Analyze a structure to list its electrodes.</p></div>
               <small>Electrode names come from the loaded SCM, not from a fixed list.</small>
+            </div>
+            <div class="field">
+              <label>Contact type and series resistance</label>
+              <div id="bi-contactopts"><p class="note">Analyze a structure to list its electrodes.</p></div>
+              <small>Default is an ideal ohmic contact. Resistor is in &Omega; (&Omega;&middot;&micro;m in 2D).</small>
             </div>
             <div id="sdev-wf"></div>
           </div>
@@ -877,9 +914,33 @@
             <div class="field"><label class="chk-field"><input type="checkbox" id="pl-mobility" checked><span>Plot mobility and velocity</span></label></div>
             <div class="field"><label class="chk-field"><input type="checkbox" id="pl-bands" checked><span>Plot band edges</span></label></div>
             <div class="field"><label class="chk-field"><input type="checkbox" id="pl-temp" checked><span>Plot temperature and heat</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="pl-potential" checked><span>Plot potential and space charge</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="pl-doping" checked><span>Plot doping profiles</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="pl-current" checked><span>Plot current densities</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="pl-recomb" checked><span>Plot recombination and generation</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="pl-driving"><span>Plot driving forces (Eparallel, ENormal, grad EF)</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="pl-bgn"><span>Plot bandgap narrowing and affinity</span></label></div>
+            <div class="field"><label class="chk-field"><input type="checkbox" id="ma-plotexplicit"><span>PlotExplicit &mdash; write only the datasets listed</span></label></div>
             <div class="field"><label class="chk-field"><input type="checkbox" id="ou-currentplot" checked><span>Write the CurrentPlot (.plt) log</span></label></div>
             <div class="field"><label class="chk-field"><input type="checkbox" id="ou-extract" checked><span>Append the parameter-extraction notes</span></label></div>
             <div class="grid2">
+              <div class="field compact">
+                <label for="ma-threads">Number_Of_Threads</label>
+                <div class="ctl"><input id="ma-threads" type="number" step="1" min="1" value="4"></div>
+              </div>
+              <div class="field compact">
+                <label for="ma-errref">ErrRef (both carriers)</label>
+                <div class="ctl"><input id="ma-errref" type="text" value="1.0e10"></div>
+              </div>
+              <div class="field compact">
+                <label for="ma-transcheme">Transient scheme</label>
+                <div class="ctl">
+                  <select id="ma-transcheme">
+                    <option value="BE">BE (backward Euler)</option>
+                    <option value="TRBDF">TRBDF</option>
+                  </select>
+                </div>
+              </div>
               <div class="field compact">
                 <label for="ma-initial">Initial guess</label>
                 <div class="ctl">
@@ -932,10 +993,10 @@
   SCM Device Viewer &middot; no server, no build step
 </footer>
 
-<script src="js/preview.js?v=v13-6"></script>
-<script src="js/sde-parser.js?v=v13-6"></script>
-<script src="js/analyze.js?v=v13-6"></script>
-<script src="js/sdevice.js?v=v13-6"></script>
-<script src="js/generator.js?v=v13-6"></script>
+<script src="js/preview.js?v=v13-7"></script>
+<script src="js/sde-parser.js?v=v13-7"></script>
+<script src="js/analyze.js?v=v13-7"></script>
+<script src="js/sdevice.js?v=v13-7"></script>
+<script src="js/generator.js?v=v13-7"></script>
 </body>
 </html>

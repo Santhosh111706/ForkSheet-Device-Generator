@@ -112,6 +112,7 @@
         band2band: false,
         avalanche: false,
         quantum: false,
+        transport: 'dd',                // dd | thermodynamic | hydrodynamic
         bandgapNarrowing: 'Slotboom',   // '' turns it off
         surfaceSRH: false,              // interface recombination at the gate oxide
         tunneling: '',                  // '' | 'NonlocalPath' | 'Schenk'
@@ -125,6 +126,10 @@
         latticeInit: 300,          // initial lattice temperature
         heatFlux: true,            // write the heat-flux output variables
       },
+
+      /* Per-electrode extras. Keyed by the SCM's own contact names. */
+      electrodeOpts: Object.fromEntries(elec.map((e) => [e.name,
+        { resistor: 0, schottky: false, barrier: 0 }])),
 
       bias: {
         vdd: 0.75,
@@ -154,17 +159,28 @@
         method: 'Blocked',
         subMethod: 'ParDiSo',
         initialGuess: 'zero',      // zero | previous
+        errRef: '1.0e10',
+        threads: 4,                // Number_Of_Threads
+        transientScheme: 'BE',     // Transient = BE | TRBDF
+        plotExplicit: false,       // write only the datasets Plot names
       },
 
       plot: {
         potential: true, field: true, carriers: true, doping: true,
         current: true, mobility: true, bands: true, recombination: true,
         temperature: true,
+        drivingForce: false,
+        bandgapNarrowing: false,
       },
 
       output: {
         currentPlot: true,         // the CurrentPlot / .plt log
         extraction: true,          // the extraction notes at the foot
+        parameterFile: '',         // File { Parameter = "..." }; '' omits it
+        acAnalysis: false,         // small-signal ACCoupled sweep
+        acStart: 1e3,
+        acEnd: 1e9,
+        acPointsPerDecade: 5,
       },
 
       meshControl: { size: 2.0 },  // nm, for the SCM refinement block
@@ -353,6 +369,10 @@
     /* ---------------- File ---------------- */
     P('File {');
     P(`    Grid    = "${st.grid}"`);
+    /* The .par file is where material and model parameters are overridden.
+       Omitted entirely when blank rather than emitted empty, because a
+       Parameter line pointing at a file that does not exist is fatal. */
+    if (st.output.parameterFile) P(`    Parameter = "${st.output.parameterFile}"`);
     P(`    Plot    = "${st.stem}_des.tdr"`);
     P(`    Current = "${st.stem}_des.plt"`);
     P(`    Output  = "${st.stem}_des.log"`);
@@ -365,8 +385,13 @@
     for (const e of elec) {
       const wf = st.workfunction[e.name];
       const tag = e.role === 'other' ? '' : `   * ${e.role}${e.device ? ' (' + e.device + ')' : ''}`;
+      const o = (st.electrodeOpts && st.electrodeOpts[e.name]) || {};
+      let extra = '';
+      if (o.schottky) extra += `  Schottky  Barrier=${f(o.barrier || 0)}`;
+      else if (wf !== undefined) extra += `  Workfunction=${f(wf)}`;
+      if (o.resistor) extra += `  Resistor=${o.resistor}`;
       P(`    { Name="${e.name}"` + ' '.repeat(Math.max(1, 12 - e.name.length)) +
-        `Voltage=0.0` + (wf !== undefined ? `  Workfunction=${f(wf)}` : '') + ' }' + tag);
+        `Voltage=0.0` + extra + ' }' + tag);
     }
     P('}');
     P('');
@@ -410,10 +435,15 @@
     }
     if (ph.tunneling) P(`    eBarrierTunneling( ${ph.tunneling} )  hBarrierTunneling( ${ph.tunneling} )`);
     if (ph.quantum) P('    eQuantumPotential  hQuantumPotential');
-    if (st.thermal.enabled) {
-      P('    Thermodynamic');
-      P(`    LatticeTemperature = ${st.thermal.latticeInit}`);
-    }
+    /* Transport: drift-diffusion is the default; Thermodynamic adds the
+       lattice-heat equation, Hydrodynamic adds carrier energy balance.
+       Self-heating needs Thermodynamic, so it wins over a plain dd choice
+       rather than silently producing a deck with no heat equation. */
+    const transport = st.thermal.enabled && ph.transport === 'dd'
+      ? 'thermodynamic' : ph.transport;
+    if (transport === 'thermodynamic') P('    Thermodynamic');
+    if (transport === 'hydrodynamic') P('    Hydrodynamic( eTemperature hTemperature )');
+    if (st.thermal.enabled) P(`    LatticeTemperature = ${st.thermal.latticeInit}`);
     P('}');
     P('');
 
@@ -427,7 +457,19 @@
     if (pl.current) P('    Current/Vector\n    eCurrent/Vector\n    hCurrent/Vector');
     if (pl.mobility) P('    eMobility\n    hMobility\n    eVelocity\n    hVelocity');
     if (pl.bands) P('    BandGap\n    ConductionBandEnergy\n    ValenceBandEnergy');
-    if (pl.recombination) P('    SRHRecombination');
+    if (pl.recombination) {
+      P('    SRHRecombination\n    AugerRecombination\n    TotalRecombination');
+      if (ph.band2band) P('    Band2BandGeneration');
+      if (ph.avalanche) P('    AvalancheGeneration\n    eAvalancheGeneration\n    hAvalancheGeneration');
+    }
+    /* Driving forces: what the high-field and surface mobility models are
+       actually responding to, so a suspicious mobility can be traced. */
+    if (pl.drivingForce) {
+      P('    eEparallel\n    hEparallel\n    eENormal\n    hENormal');
+      P('    eGradQuasiFermi/Vector\n    hGradQuasiFermi/Vector');
+    }
+    if (pl.bandgapNarrowing) P('    BandgapNarrowing\n    Affinity');
+    if (ph.quantum) P('    eQuantumPotential\n    hQuantumPotential');
     if (pl.temperature && st.thermal.enabled) {
       P('    LatticeTemperature\n    TotalHeat\n    ThermalConductivity\n    LatticeHeatFlux/Vector');
     }
@@ -464,12 +506,19 @@
     if (m.derivatives) P('    Derivatives');
     if (m.relErrControl) P('    RelErrControl');
     P(`    Digits            = ${m.digits}`);
-    P('    ErRef( electron ) = 1.0e10');
-    P('    ErRef( hole )     = 1.0e10');
+    /* ErrRef, with two r's. It was ErRef here, which is not a Math keyword
+       and would be rejected rather than ignored. */
+    P(`    ErrRef( electron ) = ${m.errRef}`);
+    P(`    ErrRef( hole )     = ${m.errRef}`);
     P(`    Iterations        = ${m.iterations}`);
     P(`    Notdamped         = ${m.notdamped}`);
     P(`    Method    = ${m.method}`);
     P(`    SubMethod = ${m.subMethod}`);
+    if (m.threads > 1) P(`    Number_Of_Threads = ${m.threads}`);
+    /* Only meaningful with Avalanche active, and costly otherwise. */
+    if (ph.avalanche) P('    AvalDerivatives');
+    if (st.bias.analysis === 'transient') P(`    Transient = ${m.transientScheme}`);
+    if (m.plotExplicit) P('    PlotExplicit');
     P('    ExitOnFailure');
     P('}');
     P('');
@@ -497,7 +546,7 @@
     const i = indent || '    ';
     return [
       `${i}Quasistationary(`,
-      `${i}    InitialStep = 0.05  Increment = 1.3`,
+      `${i}    InitialStep = 0.05  Increment = 1.3  Decrement = 2`,
       `${i}    MinStep = 1.0e-5    MaxStep = 0.1`,
       `${i}    Goal { Name = "${goalName}"  Voltage = ${voltage} }`,
       `${i}){ ${coupledSet(st)} }`,
@@ -510,7 +559,7 @@
     const step = (st.bias && st.bias.vgStep) || 0.02;
     return [
       `${i}Quasistationary(`,
-      `${i}    InitialStep = ${step}  Increment = 1.2`,
+      `${i}    InitialStep = ${step}  Increment = 1.2  Decrement = 2`,
       `${i}    MinStep = 1.0e-6    MaxStep = ${step}`,
       `${i}    Goal { Name = "${goalName}"  Voltage = ${voltage} }`,
       `${i}){ ${coupledSet(st)} }`,
@@ -579,11 +628,53 @@
         L.push(...sweep(d.drain.name, vdd, st));
       }
 
+      /* ---- small-signal, for Cgg / Cgd / ft ----
+         ACCoupled sweeps frequency at the bias already established, so it
+         is written after the DC sweeps rather than in place of them. */
+      if (st.output.acAnalysis) {
+        L.push(`*   ---- ${T.toUpperCase()}MOS small-signal ----`);
+        L.push(`    NewCurrentPrefix = "${T}_ac_"`);
+        L.push('    ACCoupled (');
+        L.push(`        StartFrequency = ${st.output.acStart}  EndFrequency = ${st.output.acEnd}`);
+        L.push(`        NumberOfPoints = ${st.output.acPointsPerDecade}  Decade`);
+        L.push(`        Node( "${d.gate.name}" "${d.drain.name}" "${d.source.name}" )`);
+        L.push('        Exclude( Poisson )');
+        L.push(`    ){ ${coupledSet(st)} }`);
+        L.push('');
+      }
+
+      /* ---- transient, when that analysis was chosen ---- */
+      if (b.analysis === 'transient') {
+        L.push(`*   ---- ${T.toUpperCase()}MOS transient ----`);
+        L.push(`    NewCurrentPrefix = "${T}_tran_"`);
+        L.push('    Transient (');
+        L.push(`        InitialTime = 0  FinalTime = ${b.transientEnd}`);
+        L.push(`        InitialStep = ${b.transientStep}  Increment = 1.3  Decrement = 2`);
+        L.push(`        MinStep = ${Number(b.transientStep) / 1000}  MaxStep = ${Number(b.transientEnd) / 20}`);
+        L.push(`    ){ ${coupledSet(st)} }`);
+        L.push('');
+      }
+
       /* return to zero so the next device starts from the same clean state */
       L.push(`*   ---- return ${T.toUpperCase()}MOS to zero ----`);
       L.push(`    NewCurrentPrefix = "${T}_reset_"`);
       L.push(...ramp(d.gate.name, '0.0', st));
       L.push(...ramp(d.drain.name, '0.0', st));
+
+      /* A current-driven sweep needs the electrode switched out of voltage
+         mode first; SDevice will not ramp a current on a voltage contact. */
+      if (b.sweepQuantity === 'current') {
+        L.push(`*   ---- ${T.toUpperCase()}MOS drain driven by current ----`);
+        L.push(`    set ("${d.drain.name}" mode current)`);
+        L.push(`    NewCurrentPrefix = "${T}_idrive_"`);
+        L.push('    Quasistationary(');
+        L.push('        InitialStep = 0.01  Increment = 1.3  Decrement = 2');
+        L.push('        MinStep = 1.0e-6    MaxStep = 0.1');
+        L.push(`        Goal { Name = "${d.drain.name}"  Current = ${(d.tag === 'p' ? -1 : 1) * 1e-6} }`);
+        L.push(`    ){ ${coupledSet(st)} }`);
+        L.push(`    set ("${d.drain.name}" mode voltage)`);
+        L.push('');
+      }
     }
 
     L.push('}');

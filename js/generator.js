@@ -2786,6 +2786,19 @@ function sdevFillControls() {
   set('bi-tend', st.bias.transientEnd);
   set('bi-tstep', st.bias.transientStep);
   set('ma-initial', st.math.initialGuess);
+  set('ph-transport', st.physics.transport);
+  set('ma-threads', st.math.threads);
+  set('ma-errref', st.math.errRef);
+  set('ma-transcheme', st.math.transientScheme);
+  chk('ma-plotexplicit', st.math.plotExplicit);
+  chk('pl-potential', st.plot.potential); chk('pl-doping', st.plot.doping);
+  chk('pl-current', st.plot.current); chk('pl-recomb', st.plot.recombination);
+  chk('pl-driving', st.plot.drivingForce); chk('pl-bgn', st.plot.bandgapNarrowing);
+  set('ou-parfile', st.output.parameterFile);
+  chk('ac-on', st.output.acAnalysis);
+  set('ac-start', st.output.acStart); set('ac-end', st.output.acEnd);
+  set('ac-pts', st.output.acPointsPerDecade);
+  const ao2 = $('#ac-opts'); if (ao2) ao2.hidden = !st.output.acAnalysis;
   chk('ou-currentplot', st.output.currentPlot);
   chk('ou-extract', st.output.extraction);
   const tr = $('#bi-transient');
@@ -2810,6 +2823,35 @@ function sdevFillControls() {
     for (const nme of names) {
       const inp = document.getElementById('bi-v-' + nme);
       if (inp) inp.addEventListener('input', sdevReadControls);
+    }
+  }
+
+  /* One row per electrode: contact type and series resistance. Built from
+     st.electrodeOpts, whose keys are the parsed contact names, so nothing
+     here assumes what the electrodes are called. */
+  const co = $('#bi-contactopts');
+  if (co) {
+    const names = Object.keys(st.electrodeOpts || {});
+    co.innerHTML = names.length
+      ? names.map((nme) => {
+          const e = escapeHtml(nme);
+          const o = st.electrodeOpts[nme];
+          return '<div class="field compact"><label>' + e + '</label>' +
+            '<div class="ctl">' +
+            '<label class="chk-field" style="flex:0 0 auto"><input type="checkbox" id="eo-s-' + e +
+            '"' + (o.schottky ? ' checked' : '') + '><span>Schottky</span></label>' +
+            '<input id="eo-b-' + e + '" type="number" step="0.01" value="' + o.barrier +
+            '" title="Barrier (eV)" style="width:5.5em">' +
+            '<input id="eo-r-' + e + '" type="number" step="1" value="' + o.resistor +
+            '" title="Resistor (ohm)" style="width:5.5em">' +
+            '</div></div>';
+        }).join('')
+      : '<p class="note">No electrodes found in this structure.</p>';
+    for (const nme of names) {
+      for (const pfx of ['eo-s-', 'eo-b-', 'eo-r-']) {
+        const inp = document.getElementById(pfx + nme);
+        if (inp) inp.addEventListener('input', sdevReadControls);
+      }
     }
   }
 
@@ -2849,6 +2891,7 @@ function sdevReadControls() {
   st.physics.band2band = on('ph-b2b'); st.physics.avalanche = on('ph-aval');
   st.physics.quantum = on('ph-quantum');
   st.physics.surfaceSRH = on('ph-surfsrh');
+  const tp = $('#ph-transport'); if (tp) st.physics.transport = tp.value;
   const bgn = $('#ph-bgn'); if (bgn) st.physics.bandgapNarrowing = bgn.value;
   const tun = $('#ph-tunnel'); if (tun) st.physics.tunneling = tun.value;
 
@@ -2883,8 +2926,34 @@ function sdevReadControls() {
   st.math.notdamped = num('ma-notdamped', 100);
   const sm = $('#ma-submethod'); if (sm) st.math.subMethod = sm.value;
   const ig = $('#ma-initial'); if (ig) st.math.initialGuess = ig.value;
+  st.math.threads = num('ma-threads', 4);
+  const er = $('#ma-errref'); if (er && er.value.trim()) st.math.errRef = er.value.trim();
+  const tsch = $('#ma-transcheme'); if (tsch) st.math.transientScheme = tsch.value;
+  st.math.plotExplicit = on('ma-plotexplicit');
+
+  st.plot.potential = on('pl-potential');
+  st.plot.doping = on('pl-doping');
+  st.plot.current = on('pl-current');
+  st.plot.recombination = on('pl-recomb');
+  st.plot.drivingForce = on('pl-driving');
+  st.plot.bandgapNarrowing = on('pl-bgn');
+
   st.output.currentPlot = on('ou-currentplot');
   st.output.extraction = on('ou-extract');
+  const pf = $('#ou-parfile'); if (pf) st.output.parameterFile = pf.value.trim();
+  st.output.acAnalysis = on('ac-on');
+  st.output.acStart = num('ac-start', 1e3);
+  st.output.acEnd = num('ac-end', 1e9);
+  st.output.acPointsPerDecade = num('ac-pts', 5);
+  const ao = $('#ac-opts'); if (ao) ao.hidden = !st.output.acAnalysis;
+
+  /* Per-electrode contact options, keyed by the SCM's own names. */
+  for (const name of Object.keys(st.electrodeOpts || {})) {
+    const o = st.electrodeOpts[name];
+    o.resistor = num('eo-r-' + name, 0);
+    o.schottky = on('eo-s-' + name);
+    o.barrier = num('eo-b-' + name, 0);
+  }
 
   st.plot.field = on('pl-field'); st.plot.carriers = on('pl-carriers');
   st.plot.mobility = on('pl-mobility'); st.plot.bands = on('pl-bands');
