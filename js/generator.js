@@ -1463,9 +1463,36 @@ function initGenerator() {
   refreshPreview();
 }
 
+/**
+ * Boot.
+ *
+ * The two steps are separated on purpose. initGenerator() wires several
+ * hundred controls, and reaching for one that is not in the page throws -
+ * which used to take the whole app down silently: the viewport kept saying
+ * "building preview..." forever because the code that draws the geometry
+ * and hides that hint never ran, and nothing said why.
+ *
+ * That is exactly what a stale cached script does after index.html changes,
+ * so the scripts are versioned now (see the ?v= note in index.html). This
+ * catch is the second line of defence: if wiring does fail, the viewport
+ * says so instead of hanging, and the error reaches the console.
+ */
 document.addEventListener('DOMContentLoaded', () => {
   if (window.Preview) window.Preview.init('viewport');
-  initGenerator();
+  try {
+    initGenerator();
+  } catch (err) {
+    console.error('initGenerator() failed:', err);
+    const hint = document.getElementById('viewer-hint');
+    if (hint) {
+      hint.innerHTML =
+        '<strong>The page failed to start.</strong>' +
+        '<span class="dim">' + String(err && err.message ? err.message : err) +
+        '</span><span class="dim">A stale cached script usually causes this - ' +
+        'reload with Ctrl+F5 (Cmd+Shift+R on a Mac).</span>';
+      hint.style.display = '';
+    }
+  }
 });
 
 /* expose for preview.js and for console debugging */
